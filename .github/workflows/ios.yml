@@ -1,0 +1,136 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile (unsigned, simulator)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project FM1Hub.xcodeproj -scheme FM1Hub -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build/xcodebuild.log | grep -E 'error:|warning:|BUILD|Compiling|Ld ' || true
+          grep -q 'BUILD SUCCEEDED' build/xcodebuild.log
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+
+  testflight:
+    name: Archive and upload to TestFlight
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets
+        id: secrets
+        run: |
+          missing=""
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::TestFlight upload skipped. Missing repository secrets:$missing (see README, 'TestFlight from GitHub')."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the App Store Connect API key
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          mkdir -p ~/private_keys
+          # The secret may be the raw .p8 text or its base64.
+          if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$ASC_KEY_P8" > ~/private_keys/AuthKey_$ASC_KEY_ID.p8
+          else
+            printf '%s' "$ASC_KEY_P8" | base64 --decode > ~/private_keys/AuthKey_$ASC_KEY_ID.p8
+          fi
+          chmod 600 ~/private_keys/AuthKey_$ASC_KEY_ID.p8
+          echo "ASC_KEY_PATH=$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
+
+      - name: Archive (Xcode cloud-managed signing)
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild -project FM1Hub.xcodeproj -scheme FM1Hub -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/FM1Hub.xcarchive \
+            -derivedDataPath build/DerivedData \
+            -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            archive 2>&1 | tee build/archive.log | grep -E 'error:|warning:|ARCHIVE|Signing|Provisioning' || true
+          grep -q 'ARCHIVE SUCCEEDED' build/archive.log
+
+      - name: Upload to TestFlight
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          set -o pipefail
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath build/FM1Hub.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee build/export.log | grep -vE '^\s*$' || true
+          grep -q 'EXPORT SUCCEEDED' build/export.log
+          echo "Uploaded. It shows up in App Store Connect > TestFlight after Apple's processing (usually 5-15 minutes)."
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: |
+            build/archive.log
+            build/export.log
+          if-no-files-found: ignore

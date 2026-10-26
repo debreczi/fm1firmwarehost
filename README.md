@@ -42,6 +42,40 @@ iOS 17 deployment target, a free or paid Apple developer account for signing on 
 The Simulator has no USB MIDI, so the catalogue, filters, history and backups screens work there but connecting to an
 FM-1 needs a real phone.
 
+## TestFlight from GitHub
+
+`.github/workflows/ios.yml` compiles the app on every push (unsigned, for the simulator, so it needs no secrets) and
+then archives, signs and uploads it to TestFlight when four repository secrets are present. Signing uses Xcode's
+cloud-managed certificates through an App Store Connect API key, so no certificate or provisioning profile is
+exported by hand.
+
+One-time setup (needs a paid Apple Developer Program membership):
+
+1. **App ID and app record.** In [App Store Connect](https://appstoreconnect.apple.com) → Apps → `+` → New App:
+   platform iOS, bundle ID `com.debreczi.fm1hub` (register it under Identifiers if it is not offered), any name and
+   SKU. TestFlight builds can only be uploaded to an existing app record.
+2. **API key.** App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys → `+`.
+   Role **App Manager** (Admin also works). Download the `.p8` once; note the **Key ID** and the **Issuer ID**.
+3. **Team ID.** [developer.apple.com/account](https://developer.apple.com/account) → Membership details.
+4. **Repository secrets** (GitHub → Settings → Secrets and variables → Actions):
+
+   | Secret | Value |
+   | --- | --- |
+   | `ASC_KEY_ID` | the key's ID, e.g. `A1B2C3D4E5` |
+   | `ASC_ISSUER_ID` | the issuer UUID |
+   | `ASC_KEY_P8` | the full text of the `.p8` file (or its base64) |
+   | `APPLE_TEAM_ID` | the 10-character team ID |
+
+5. Push to `main` or run the workflow by hand (Actions → iOS → Run workflow). The build number is the workflow
+   run number; Xcode bumps it if App Store Connect already has it.
+6. First build only: in App Store Connect → TestFlight, answer the export-compliance question (the app uses only
+   HTTPS, so "standard encryption, exempt"), then add yourself as an internal tester. The TestFlight app on the phone
+   installs it.
+
+If the archive step fails with a signing error on the first run, open the project once in Xcode with your team
+selected and let it register the bundle ID, or register `com.debreczi.fm1hub` by hand under Identifiers; cloud
+signing then works on the next run.
+
 ## Project layout
 
 ```
