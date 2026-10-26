@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build:
     name: Compile (unsigned, simulator)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
     name: Archive and upload to TestFlight
     needs: build
     if: github.event_name != 'pull_request'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
