@@ -30,7 +30,7 @@ Not in the app: the ROM-bootloader rescue (the "UBOOT1.00" USB disk), which need
 
 ## Building
 
-Requirements: **Xcode 16 or newer** (the project uses a synchronized folder, so there is no file list to maintain),
+Requirements: **Xcode 16 or newer** locally (CI uses Xcode 26 on macos-26 runners because App Store uploads must use the iOS 26 SDK) (the project uses a synchronized folder, so there is no file list to maintain),
 iOS 17 deployment target, a free or paid Apple developer account for signing on a device.
 
 1. Open `FM1Hub.xcodeproj`.
