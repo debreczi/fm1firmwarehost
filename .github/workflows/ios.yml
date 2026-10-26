@@ -22,12 +22,13 @@ jobs:
       - name: Build for the simulator
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild -project FM1Hub.xcodeproj -scheme FM1Hub -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | tee build/xcodebuild.log | grep -E 'error:|warning:|BUILD|Compiling|Ld ' || true
-          grep -q 'BUILD SUCCEEDED' build/xcodebuild.log
+            build 2>&1 | tee build/xcodebuild.log | grep -E 'error:|BUILD' || true
+          grep -q 'BUILD SUCCEEDED' build/xcodebuild.log || { tail -40 build/xcodebuild.log; exit 1; }
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -81,6 +82,7 @@ jobs:
         if: steps.secrets.outputs.ready == 'true'
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild -project FM1Hub.xcodeproj -scheme FM1Hub -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/FM1Hub.xcarchive \
@@ -92,8 +94,8 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            archive 2>&1 | tee build/archive.log | grep -E 'error:|warning:|ARCHIVE|Signing|Provisioning' || true
-          grep -q 'ARCHIVE SUCCEEDED' build/archive.log
+            archive 2>&1 | tee build/archive.log | grep -E 'error:|ARCHIVE|[Ss]igning|[Pp]rovisioning' || true
+          grep -q 'ARCHIVE SUCCEEDED' build/archive.log || { tail -60 build/archive.log; exit 1; }
 
       - name: Upload to TestFlight
         if: steps.secrets.outputs.ready == 'true'
@@ -122,7 +124,7 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee build/export.log | grep -vE '^\s*$' || true
-          grep -q 'EXPORT SUCCEEDED' build/export.log
+          grep -q 'EXPORT SUCCEEDED' build/export.log || { tail -60 build/export.log; exit 1; }
           echo "Uploaded. It shows up in App Store Connect > TestFlight after Apple's processing (usually 5-15 minutes)."
 
       - name: Upload logs
