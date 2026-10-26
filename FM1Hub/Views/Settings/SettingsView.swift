@@ -16,11 +16,7 @@ struct SettingsView: View {
                         Text("Back up before every install")
                         Text("When the running firmware answers the Felucca backup protocol, its music, settings, projects and samples are saved before the new firmware goes on.").font(.footnote)
                     }
-                    Toggle(isOn: $settings.keepPackagesOffline) {
-                        Text("Keep downloaded packages")
-                        Text("Packages stay in Files › FM-1 Hub › Packages, so a firmware can be installed again without the network.").font(.footnote)
-                    }
-                } header: { Text("Installing") }
+                } header: { Text("Installing") } footer: { Text("Every package that goes on the FM-1 is kept on this phone (about 0.6 MB each), so any firmware you installed can be put back without the network.") }
 
                 Section {
                     Toggle(isOn: $settings.probeAllPorts) {
@@ -39,7 +35,7 @@ struct SettingsView: View {
                     LabeledContent("Packages", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
                     LabeledContent("Backups", value: ByteCountFormatter.string(fromByteCount: library.snapshotsSize(), countStyle: .file))
                     LabeledContent("Catalogue", value: catalog.updated ?? "–")
-                    Button("Delete downloaded packages", role: .destructive) { confirmClear = true }
+                    Button("Delete the package cache", role: .destructive) { confirmClear = true }
                     Button("Refresh the catalogue") { Task { await catalog.refresh(force: true) } }
                 } header: { Text("Storage") } footer: { Text("Backups are never deleted here: each has its own Delete button. Everything lives on this iPhone; nothing is sent anywhere, there is no account.") }
 
@@ -66,7 +62,7 @@ struct SettingsView: View {
             .confirmationDialog("Delete the downloaded packages?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { PackageStore.shared.clearCache(); cacheSize = PackageStore.shared.cacheSize() }
                 Button("Cancel", role: .cancel) {}
-            } message: { Text("Packages inside backups are kept. Installing downloads a package again.") }
+            } message: { Text("Packages inside backups are kept. A firmware that is only in the cache can no longer be restored without the network.") }
         }
     }
 }

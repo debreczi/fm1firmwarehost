@@ -58,7 +58,7 @@ struct JobSheet: View {
     private func icon(for k: DeviceJob.Kind) -> String {
         switch k {
         case .install, .resume, .file: return "bolt.fill"
-        case .stock: return "arrow.uturn.backward"
+        case .official: return "checkmark.seal"
         case .snapshot: return "externaldrive.badge.plus"
         case .restoreFirmware, .restoreArchive: return "arrow.counterclockwise"
         }
@@ -66,7 +66,7 @@ struct JobSheet: View {
 
     private var cancellable: Bool {
         switch device.phase {
-        case .connecting, .downloading: return true
+        case .connecting, .downloading, .searching: return true
         case .installing(let s):
             switch s { case .start, .verify: return true; default: return false }
         default: return false
@@ -77,7 +77,8 @@ struct JobSheet: View {
         switch device.phase {
         case .idle: return ""
         case .connecting: return "Asking the MIDI ports which one is the FM-1."
-        case .downloading(let f): return f >= 1 ? "Checking the package (SHA-256)…" : "Downloading the package from the hub and checking it against the catalogue."
+        case .downloading(let f): return f >= 1 ? "Checking the package (SHA-256)…" : "Downloading the package and checking it."
+        case .searching(let where_): return where_
         case .installing(let s):
             switch s {
             case .start(let id): return "The FM-1 (\(id)) is asked to start the update."
@@ -98,7 +99,7 @@ struct JobSheet: View {
             switch device.phase {
             case .idle: return 0
             case .connecting: return 0
-            case .downloading: return 1
+            case .downloading, .searching: return 1
             case .installing(let s):
                 switch s { case .start, .verify: return 2; case .loader: return 3; case .write: return 4; case .reboot: return 5; case .done: return 6 }
             case .backingUp, .restoring: return -1

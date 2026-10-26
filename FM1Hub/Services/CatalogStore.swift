@@ -70,8 +70,7 @@ final class CatalogStore {
     /// range (the "ident" pattern) names one when only one matches.
     func whoIs(_ text: String?) -> WhoIs? {
         guard let text = text, !text.isEmpty else { return nil }
-        if text == "FM-1_015" { return WhoIs(firmware: nil, exact: true, name: "the official firmware (V15)") }
-        if text == "FM-1_016" { return WhoIs(firmware: nil, exact: true, name: "the official firmware (V16)") }
+        if let v = FWSCPackage.officialVersion(of: text) { return WhoIs(firmware: nil, exact: true, name: "the official firmware (\(v))") }
         if text == "FM-1_000" { return WhoIs(firmware: nil, exact: true, name: "the USB rescue mode (FM-1_000)") }
         if text.lowercased().hasPrefix("ota-") { return WhoIs(firmware: nil, exact: true, name: "the update loader (\(text))") }
         let exact = firmwares.filter { $0.product == text }
@@ -86,4 +85,26 @@ final class CatalogStore {
         if fam.count == 1 { return WhoIs(firmware: fam[0], exact: false, name: fam[0].name) }
         return WhoIs(firmware: nil, exact: false, name: "another firmware (\(text))")
     }
+
+    /// The firmwares whose makers may have released the version an FM-1 reports: the family the identity pattern names,
+    /// and those whose own number has the same length and leading digit (Skiff 1.4 is FM-1_714, Skiff 2.0.1 FM-1_720).
+    /// Nearest number first.
+    func familyCandidates(for text: String) -> [Firmware] {
+        guard let id = FM1Identity.parse(text: text), let us = text.lastIndex(of: "_") else { return [] }
+        let digits = text[text.index(after: us)...]
+        var out: [Firmware] = []
+        for f in firmwares where !f.repo.isNilOrEmpty {
+            let own = f.productDigits
+            var hit = false
+            if let ident = f.ident, ident != "FM-1_\\d{3,8}", let re = try? NSRegularExpression(pattern: "^(?:" + ident + ")$"),
+               re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil { hit = true }
+            if own.count == digits.count, own.first == digits.first { hit = true }
+            if hit && !out.contains(where: { $0.repo == f.repo }) { out.append(f) }
+        }
+        return out.sorted { abs((Int($0.productDigits) ?? 0) - id.version) < abs((Int($1.productDigits) ?? 0) - id.version) }
+    }
+}
+
+extension Optional where Wrapped == String {
+    var isNilOrEmpty: Bool { self?.isEmpty ?? true }
 }
