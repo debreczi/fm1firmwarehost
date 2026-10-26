@@ -115,7 +115,7 @@ struct SnapshotDetailView: View {
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
                         }
                     } else {
-                        Text("No package for \(snapshot.identity): the hub does not have this firmware. Its maker's page has the installer.").font(.system(size: 13)).foregroundStyle(Theme.textDim)
+                        AttachPackageView(snapshot: $snapshot)
                     }
                     if snapshot.hasArchive {
                         Button { confirmArchive = true } label: { Label("Restore the music archive", systemImage: "music.note") }
@@ -182,5 +182,73 @@ struct SnapshotDetailView: View {
             Button("Delete", role: .destructive) { library.remove(snapshot); dismiss() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("The saved package and archive are deleted from this iPhone.") }
+    }
+}
+
+
+/// A backup without a package: fetch the right one from the hub so the firmware can be restored.
+struct AttachPackageView: View {
+    @Environment(DeviceController.self) private var device
+    @Environment(CatalogStore.self) private var catalog
+    @Binding var snapshot: Snapshot
+    @State private var busy = false
+    @State private var error = ""
+    @State private var picking = false
+    @State private var query = ""
+
+    private var guess: Firmware? { snapshot.firmwareId.flatMap { catalog.firmware(id: $0) } ?? catalog.whoIs(snapshot.identity)?.firmware }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("No firmware package in this backup", systemImage: "shippingbox").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
+            Text(snapshot.notes.isEmpty ? "The FM-1 reported \(snapshot.identity). Attach the package of the firmware that was on it, from the hub, to make this backup restorable." : snapshot.notes)
+                .font(.system(size: 13)).foregroundStyle(Theme.textDim)
+            if let g = guess {
+                Button { attach(g) } label: { Label(busy ? "Downloading…" : "Attach \(g.name) \(g.version) from the hub", systemImage: "arrow.down.circle") }
+                    .buttonStyle(PrimaryButtonStyle(tint: Look.colour(for: g.id))).disabled(busy)
+            }
+            if snapshot.identity == FWSCPackage.stockV15Product {
+                Button { attach(nil) } label: { Label("Attach the official V15", systemImage: "arrow.down.circle") }.buttonStyle(PrimaryButtonStyle()).disabled(busy)
+            }
+            Button { picking = true } label: { Label("Choose another firmware…", systemImage: "list.bullet") }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
+            if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Theme.err) }
+        }
+        .sheet(isPresented: $picking) {
+            NavigationStack {
+                List {
+                    let q = query.lowercased()
+                    let list = catalog.firmwares.filter { q.isEmpty || $0.searchText.contains(q) || $0.product.lowercased().contains(q) }
+                    ForEach(list) { f in
+                        Button {
+                            picking = false
+                            attach(f)
+                        } label: {
+                            HStack {
+                                Circle().fill(Look.colour(for: f.id)).frame(width: 10, height: 10)
+                                VStack(alignment: .leading) {
+                                    Text("\(f.name) \(f.version)").foregroundStyle(.white)
+                                    Text("\(f.author) · reports \(f.product)").font(.system(size: 12)).foregroundStyle(Theme.textDim)
+                                }
+                            }
+                        }
+                    }
+                }
+                .searchable(text: $query, prompt: "Name or identity (FM-1_9xx)")
+                .navigationTitle("Which firmware was on it?")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { picking = false } } }
+                .scrollContentBackground(.hidden).hubBackground()
+            }
+        }
+    }
+
+    private func attach(_ f: Firmware?) {
+        busy = true
+        error = ""
+        Task {
+            if let e = await device.attachPackage(to: snapshot, firmware: f) { error = e }
+            else if let fresh = device.library.snapshots.first(where: { $0.id == snapshot.id }) { snapshot = fresh }
+            busy = false
+        }
     }
 }

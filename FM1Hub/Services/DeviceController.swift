@@ -394,22 +394,58 @@ final class DeviceController {
         }
         // the package: the exact version when the hub has it, else the hub's current one of that family
         if withPackage {
-            if dev.identity.text == FWSCPackage.stockV15Product {
-                if let pkg = try? await packages.stockPackage(catalog.stock) {
-                    try? Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
-                    s.packageFile = "package.fwsc"; s.packageSHA256 = pkg.sha256; s.packageSize = pkg.bytes.count; s.product = pkg.product; s.packageExact = true
+            phase = .downloading(0)
+            do {
+                if dev.identity.text == FWSCPackage.stockV15Product {
+                    let pkg = try await packages.stockPackage(catalog.stock)
+                    try storePackage(pkg, in: &s, exact: true, version: "V15")
+                } else if let f = who?.firmware {
+                    let pkg = try await packages.package(for: f)
+                    try storePackage(pkg, in: &s, exact: who?.exact == true, version: f.version)
+                } else {
+                    s.notes = "No package saved: the hub's catalogue has no firmware that reports \(dev.identity.text). Attach one below if you know which firmware it is."
                 }
-            } else if let f = who?.firmware {
-                phase = .downloading(0)
-                if let pkg = try? await packages.package(for: f) {
-                    try? Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
-                    s.packageFile = "package.fwsc"; s.packageSHA256 = pkg.sha256; s.packageSize = pkg.bytes.count; s.product = pkg.product
-                    s.packageExact = who?.exact == true
-                    s.version = f.version
-                }
+            } catch {
+                append("package for the backup failed: \(error.localizedDescription)")
+                s.notes = "No package saved: \(error.localizedDescription) Attach it below once the network is back."
             }
         }
         return s
+    }
+
+    private func storePackage(_ pkg: FWSCPackage, in s: inout Snapshot, exact: Bool, version: String?) throws {
+        let folder = library.folder(for: s)
+        Paths.ensure(folder)
+        try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
+        s.packageFile = "package.fwsc"
+        s.packageSHA256 = pkg.sha256
+        s.packageSize = pkg.bytes.count
+        s.product = pkg.product
+        s.packageExact = exact
+        if let v = version { s.version = v }
+    }
+
+    /// Attach a package to a backup made without one: the firmware's from the hub (or the official V15 when `firmware` is nil).
+    /// Returns an error text, or nil when it worked.
+    func attachPackage(to snapshot: Snapshot, firmware: Firmware?) async -> String? {
+        var s = snapshot
+        do {
+            if let f = firmware {
+                let pkg = try await packages.package(for: f)
+                try storePackage(pkg, in: &s, exact: f.product == s.identity, version: f.version)
+                s.firmwareId = f.id
+                s.firmwareName = f.name
+            } else {
+                let pkg = try await packages.stockPackage(catalog.stock)
+                try storePackage(pkg, in: &s, exact: s.identity == FWSCPackage.stockV15Product, version: "V15")
+                s.firmwareName = "Official firmware"
+            }
+            s.notes = ""
+            library.update(s)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     /// Put a snapshot's firmware back.
