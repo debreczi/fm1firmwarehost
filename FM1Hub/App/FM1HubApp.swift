@@ -1,0 +1,31 @@
+import SwiftUI
+
+@main
+struct FM1HubApp: App {
+    @State private var settings: AppSettings
+    @State private var catalog: CatalogStore
+    @State private var library: LibraryStore
+    @State private var device: DeviceController
+
+    init() {
+        let settings = AppSettings()
+        let catalog = CatalogStore()
+        let library = LibraryStore()
+        _settings = State(initialValue: settings)
+        _catalog = State(initialValue: catalog)
+        _library = State(initialValue: library)
+        _device = State(initialValue: DeviceController(catalog: catalog, library: library, settings: settings))
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environment(settings)
+                .environment(catalog)
+                .environment(library)
+                .environment(device)
+                .preferredColorScheme(.dark)
+                .tint(Theme.accent)
+        }
+    }
+}
