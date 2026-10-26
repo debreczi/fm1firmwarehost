@@ -8,6 +8,7 @@ struct DeviceView: View {
     @Environment(AppSettings.self) private var settings
     @State private var importing = false
     @State private var confirmStock = false
+    @State private var confirmOfficialLatest = true
     @State private var askName = false
     @State private var snapshotName = ""
     @State private var showLog = false
@@ -19,6 +20,7 @@ struct DeviceView: View {
                     statusCard
                     if device.loaderWaiting != nil { resumeCard }
                     actions
+                    officialCard
                     portsCard
                     howTo
                     logCard
@@ -30,12 +32,15 @@ struct DeviceView: View {
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .item], allowsMultipleSelection: false) { result in
                 if case .success(let urls) = result, let u = urls.first { device.installFile(u) }
             }
-            .confirmationDialog("Back to the official firmware?", isPresented: $confirmStock, titleVisibility: .visible) {
-                Button("Install M-VAVE's V15") { device.installStock() }
+            .confirmationDialog(confirmOfficialLatest ? "Install M-VAVE's current firmware\(device.officialLatestVersion.map { " (\($0))" } ?? "")?" : "Back to the official V15?", isPresented: $confirmStock, titleVisibility: .visible) {
+                Button(confirmOfficialLatest ? "Install the latest official" : "Install V15") { device.installOfficial(latest: confirmOfficialLatest) }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("M-VAVE's own FM-1 V15, as the hub serves it, checked byte for byte (SHA-256) before anything is written.")
+                Text(confirmOfficialLatest
+                     ? "The file M-VAVE publishes on m-vave.com, fetched now; its identity is read from the file before anything is written."
+                     : "M-VAVE's own FM-1 V15 as the hub serves it: the recovery image, checked byte for byte (SHA-256) before anything is written.")
             }
+            .task { await device.checkOfficial() }
             .alert("Name this backup", isPresented: $askName) {
                 TextField("Name", text: $snapshotName)
                 Button("Save") { device.snapshot(name: snapshotName.isEmpty ? nil : snapshotName) }
@@ -105,7 +110,7 @@ struct DeviceView: View {
             Label("The FM-1 is in update mode", systemImage: "exclamationmark.triangle.fill").font(.system(size: 16, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
             Text("An update was interrupted (\(device.loaderWaiting?.text ?? "")). Installing any firmware from the list continues from here. Or write the last one again:")
                 .font(.system(size: 13)).foregroundStyle(Theme.textDim)
-            Button { device.resume(f) } label: { Label("Resume: \(f?.name ?? (last?.name ?? "official V15"))", systemImage: "arrow.clockwise") }
+            Button { device.resume() } label: { Label("Resume: \(f?.name ?? (last?.name ?? "the last firmware"))", systemImage: "arrow.clockwise") }
                 .buttonStyle(PrimaryButtonStyle(tint: Theme.warn)).disabled(device.isBusy)
         }
         .padding(16).card(tint: Theme.warn)
@@ -118,11 +123,24 @@ struct DeviceView: View {
                 Button { snapshotName = device.whoIs?.firmware?.name ?? device.whoIs?.name ?? ""; askName = true } label: {
                     Label("Back up the FM-1 now", systemImage: "externaldrive.badge.plus")
                 }.buttonStyle(PrimaryButtonStyle(tint: Theme.accent)).disabled(device.isBusy)
-                Button { confirmStock = true } label: { Label("Back to official V15", systemImage: "arrow.uturn.backward") }
+                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases) and, on Felucca-family firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
+            }
+            .padding(14).card()
+        }
+    }
+
+    private var officialCard: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            SectionHeader(text: "Official firmware")
+            VStack(spacing: 10) {
+                Button { confirmOfficialLatest = true; confirmStock = true } label: {
+                    Label(device.officialLatestVersion.map { "Install the latest official (\($0))" } ?? (device.officialChecking ? "Checking m-vave.com…" : "Install the latest official"), systemImage: "checkmark.seal")
+                }
+                .buttonStyle(PrimaryButtonStyle(tint: Color(hex: "#9aa4b2"))).disabled(device.isBusy)
+                Button { confirmOfficialLatest = false; confirmStock = true } label: { Label("Back to V15 (recovery image)", systemImage: "arrow.uturn.backward") }
                     .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
-                Button { importing = true } label: { Label("Install a package from Files (.fwsc)", systemImage: "folder") }
-                    .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
-                Text("A package from Files: a release downloaded from GitHub, or the official FM-1.fwsc from m-vave.com. Its identity is read from the file; the hub's catalogue names it when the checksum is known.")
+                Text("The latest comes straight from M-VAVE's download server, so a new official version shows up here without an app update. V15 is the known-good image the hub keeps for getting back to stock.")
                     .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
             }
             .padding(14).card()
@@ -180,6 +198,8 @@ struct DeviceView: View {
     private var logCard: some View {
         DisclosureGroup(isExpanded: $showLog) {
             VStack(alignment: .leading, spacing: 2) {
+                Button { importing = true } label: { Label("Install a .fwsc from Files (last resort)", systemImage: "folder").font(.system(size: 13, weight: .semibold)) }
+                    .buttonStyle(.borderless).disabled(device.isBusy).padding(.vertical, 6)
                 if device.log.isEmpty { Text("Nothing yet.").foregroundStyle(Theme.textFaint) }
                 ForEach(Array(device.log.suffix(60).enumerated()), id: \.offset) { _, line in
                     Text(line).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.textDim).textSelection(.enabled)
@@ -188,7 +208,7 @@ struct DeviceView: View {
             }
             .padding(.top, 8)
         } label: {
-            Label("Log", systemImage: "terminal").font(.system(size: 14, weight: .semibold, design: .rounded))
+            Label("More and log", systemImage: "terminal").font(.system(size: 14, weight: .semibold, design: .rounded))
         }
         .padding(14).card()
     }

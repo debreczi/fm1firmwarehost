@@ -110,6 +110,8 @@ struct Firmware: Codable, Identifiable, Hashable {
     var imageURL: URL { HubAPI.url("img/\(id).png") }
     var sizeText: String { ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file) }
     var licenseText: String { lic ?? "GPL-3.0" }
+    /// The number after "FM-1_", as text.
+    var productDigits: Substring { product.split(separator: "_").last ?? "" }
     var searchText: String { [name, author, what, version, kinds.joined(separator: " "), product].joined(separator: " ").lowercased() }
 }
 
@@ -147,6 +149,10 @@ enum HubAPI {
     static let creatorsPage = URL(string: "https://thefirmwarehub.com/creators/")!
     static let submit = URL(string: "https://thefirmwarehub.com/submit/")!
     static let stockDownload = URL(string: "https://www.m-vave.com/download")!
+    /// M-VAVE's current official FM-1 firmware, the file behind "PC Firmware > FM-1" on m-vave.com/download.
+    static let officialLatest = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc")!
+    static let officialNotes = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/releaseNote/firmware/FM-1.txt")!
+    static func releases(repo: String) -> URL { URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=4")! }
 
     static func url(_ path: String) -> URL {
         if let u = URL(string: path), u.scheme != nil { return u }

@@ -6,6 +6,7 @@ import SwiftUI
 enum DevicePhase: Equatable {
     case idle
     case connecting
+    case searching(String)
     case downloading(Double)
     case installing(InstallStep)
     case backingUp(Int, Int)
@@ -17,6 +18,7 @@ enum DevicePhase: Equatable {
         switch self {
         case .idle: return "Idle"
         case .connecting: return "Looking for the FM-1"
+        case .searching: return "Finding the package"
         case .downloading: return "Loading the package"
         case .installing(let s): return s.title
         case .backingUp: return "Backing up"
@@ -26,7 +28,7 @@ enum DevicePhase: Equatable {
 
     var fraction: Double? {
         switch self {
-        case .idle, .connecting: return nil
+        case .idle, .connecting, .searching: return nil
         case .downloading(let f): return f
         case .installing(let s): return s.fraction
         case .backingUp(let d, let t), .restoring(let d, let t): return t > 0 ? Double(d) / Double(t) : nil
@@ -36,7 +38,7 @@ enum DevicePhase: Equatable {
 
 /// A running or finished job, shown in the progress sheet.
 struct DeviceJob: Identifiable, Equatable {
-    enum Kind: Equatable { case install, stock, resume, snapshot, restoreFirmware, restoreArchive, file }
+    enum Kind: Equatable { case install, official, resume, snapshot, restoreFirmware, restoreArchive, file }
     let id = UUID()
     let kind: Kind
     var title: String
@@ -68,6 +70,9 @@ final class DeviceController {
     private(set) var midiPorts: [String] = []
     private(set) var loaderWaiting: FM1Identity?
     private(set) var feluccaBackupSupported: Bool?
+    /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
+    private(set) var officialLatest: String?
+    private(set) var officialChecking = false
     var statusMessage: String = ""
     var showJobSheet = false
 
@@ -82,11 +87,13 @@ final class DeviceController {
             Task { @MainActor in self?.setupChanged() }
         }
         refreshPorts()
+        officialLatest = packages.newestCachedOfficial()?.product
     }
 
     var whoIs: WhoIs? { catalog.whoIs(identity?.text) }
     var isConnected: Bool { identity != nil }
     var isBusy: Bool { phase.isBusy }
+    var officialLatestVersion: String? { officialLatest.flatMap { FWSCPackage.officialVersion(of: $0) } }
 
     private func makeUpdater() -> FM1Updater {
         let u = FM1Updater(engine: engine)
@@ -122,6 +129,17 @@ final class DeviceController {
     func choosePort(_ name: String) {
         if !settings.chosenPorts.contains(name) { settings.chosenPorts.append(name) }
         otherPorts.removeAll { $0 == name }
+    }
+
+    /// Asks M-VAVE's server which official version is current (and keeps the file). Quiet when offline.
+    func checkOfficial() async {
+        guard !officialChecking else { return }
+        officialChecking = true
+        defer { officialChecking = false }
+        if let p = try? await packages.officialLatest() {
+            officialLatest = p.product
+            append("official firmware on m-vave.com: \(p.product)")
+        }
     }
 
     // MARK: Connect
@@ -186,7 +204,6 @@ final class DeviceController {
             phase = .downloading(0)
             let pkg = try await packages.package(for: f) { p in Task { @MainActor in self.phase = .downloading(p) } }
             let after = try await flash(pkg, product: f.product, stockLoader: f.usesStockLoader)
-            if !settings.keepPackagesOffline { try? FileManager.default.removeItem(at: packages.localURL(for: f)) }
             library.add(InstallRecord(firmwareId: f.id, name: f.name, version: f.version, product: f.product, sha256: f.sha256,
                                       identityBefore: before, identityAfter: after, source: .hub, success: true))
             j.message = "\(f.name) \(f.version) is on your FM-1."
@@ -197,26 +214,43 @@ final class DeviceController {
         }
     }
 
-    func installStock() {
+    /// M-VAVE's own firmware: the current one from their server (`latest`), or the V15 recovery image from the hub.
+    func installOfficial(latest: Bool) {
         guard !isBusy else { return }
-        var j = DeviceJob(kind: .stock, title: "Official firmware V15", subtitle: "M-VAVE's own FM-1 V15", colour: Color(hex: "#9aa4b2"), imageURL: nil)
+        let title = latest ? "Official firmware" : "Official firmware V15"
+        var j = DeviceJob(kind: .official, title: title, subtitle: latest ? "M-VAVE's current release" : "M-VAVE's recovery image, from the hub", colour: Color(hex: "#9aa4b2"), imageURL: nil)
+        var product = latest ? (officialLatest ?? "") : FWSCPackage.stockV15Product
         start(job: j) { [self] in
             let before = identity?.text
             try await autoSnapshotIfWanted()
             phase = .downloading(0)
-            let pkg = try await packages.stockPackage(catalog.stock) { p in Task { @MainActor in self.phase = .downloading(p) } }
-            let after = try await flash(pkg, product: FWSCPackage.stockV15Product, stockLoader: true)
-            library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: "V15", product: FWSCPackage.stockV15Product, sha256: pkg.sha256,
+            let pkg: FWSCPackage
+            if latest {
+                do {
+                    pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
+                } catch {
+                    guard let cached = try? await packages.officialLatest(cachedOnly: true) else { throw error }
+                    append("m-vave.com unreachable, using the cached \(cached.product)")
+                    pkg = cached
+                }
+                officialLatest = pkg.product
+            } else {
+                pkg = try await packages.stockPackage(catalog.stock) { p in Task { @MainActor in self.phase = .downloading(p) } }
+            }
+            product = pkg.product
+            j.title = "Official firmware \(pkg.officialVersion ?? pkg.product)"
+            let after = try await flash(pkg, product: pkg.product, stockLoader: true)
+            library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: pkg.officialVersion ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .stock, success: true))
-            j.message = "The official V15 is on your FM-1."
+            j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
             return j
         } onFailure: { [self] e in
-            library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: "V15", product: FWSCPackage.stockV15Product, sha256: nil,
+            library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: FWSCPackage.officialVersion(of: product) ?? "", product: product, sha256: nil,
                                       identityBefore: identity?.text, identityAfter: nil, source: .stock, success: false, error: e.localizedDescription))
         }
     }
 
-    /// A package chosen in the Files app: the hub's own format, or the official V15 downloaded from m-vave.com.
+    /// A package chosen in the Files app (the last resort: a release the app could not find on its own).
     func installFile(_ url: URL) {
         guard !isBusy else { return }
         var j = DeviceJob(kind: .file, title: url.lastPathComponent, subtitle: "Package from a file", colour: Color(hex: "#9aa4b2"), imageURL: nil)
@@ -227,13 +261,14 @@ final class DeviceController {
             let data = try Data(contentsOf: url)
             let pkg = try FWSCPackage(data: data)
             guard pkg.product.hasPrefix("FM-1_") else { throw FM1Error.package("The file is for \(pkg.product), not for an FM-1.") }
+            packages.keep(pkg)
             let who = catalog.whoIs(pkg.product)
             let known = catalog.firmwares.first { $0.sha256 == pkg.sha256 }
             j.title = known?.name ?? who?.name ?? pkg.product
             j.subtitle = known.map { "\($0.version) · \(url.lastPathComponent)" } ?? url.lastPathComponent
             if let k = known { j.colour = Look.colour(for: k.id); j.imageURL = k.imageURL }
             try await autoSnapshotIfWanted()
-            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isStockV15 || known?.usesStockLoader == true)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || known?.usesStockLoader == true)
             library.add(InstallRecord(firmwareId: known?.id, name: j.title, version: known?.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .file, success: true))
             j.message = "\(j.title) is on your FM-1."
@@ -244,25 +279,28 @@ final class DeviceController {
         }
     }
 
-    /// The device is in update mode (an interrupted update): write the package again, from the loader.
-    func resume(_ f: Firmware?) {
-        guard !isBusy else { return }
-        let title = f?.name ?? "Official firmware V15"
-        var j = DeviceJob(kind: .resume, title: "Resume: \(title)", subtitle: f?.version ?? "V15", colour: f.map { Look.colour(for: $0.id) } ?? Color(hex: "#9aa4b2"), imageURL: f?.imageURL)
+    /// The device is in update mode (an interrupted update): write the last package again, from the loader.
+    func resume() {
+        guard !isBusy, let last = library.lastInstalled else { return }
+        let f = last.firmwareId.flatMap { catalog.firmware(id: $0) }
+        var j = DeviceJob(kind: .resume, title: "Resume: \(last.name)", subtitle: last.version, colour: f.map { Look.colour(for: $0.id) } ?? Color(hex: "#9aa4b2"), imageURL: f?.imageURL)
         start(job: j) { [self] in
             phase = .downloading(0)
             let pkg: FWSCPackage
-            if let f = f { pkg = try await packages.package(for: f) } else { pkg = try await packages.stockPackage(catalog.stock) }
+            if let f = f { pkg = try await packages.package(for: f) }
+            else if let p = packages.localPackage(product: last.product) { pkg = p }
+            else if last.product == FWSCPackage.stockV15Product { pkg = try await packages.stockPackage(catalog.stock) }
+            else { throw FM1Error.package("The last package (\(last.product)) is not on this phone any more.") }
             let up = makeUpdater()
-            let stockProduct: String? = (f == nil || f?.usesStockLoader == true) ? pkg.product : nil
+            let stockProduct: String? = (pkg.isOfficial || f?.usesStockLoader == true) ? pkg.product : nil
             let done = try await up.resume(image: pkg.logicalImage, stockProduct: stockProduct) { s in Task { @MainActor in self.phase = .installing(s) } }
             guard done else { throw FM1Error.stopped("The loader stopped before the end. Replug and try again.") }
             identity = FM1Identity.parse(text: pkg.product)
             identityDate = Date()
             loaderWaiting = nil
-            library.add(InstallRecord(firmwareId: f?.id, name: title, version: f?.version ?? "V15", product: pkg.product, sha256: pkg.sha256,
+            library.add(InstallRecord(firmwareId: f?.id, name: last.name, version: last.version, product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: "update loader", identityAfter: pkg.product, source: .resume, success: true))
-            j.message = "\(title) was written. If the FM-1 did not restart, power-cycle it."
+            j.message = "\(last.name) was written. If the FM-1 did not restart, power-cycle it."
             return j
         } onFailure: { _ in }
     }
@@ -271,6 +309,7 @@ final class DeviceController {
     private func flash(_ pkg: FWSCPackage, product: String, stockLoader: Bool) async throws -> String {
         let up = makeUpdater()
         let image = pkg.logicalImage
+        packages.keep(pkg)
         var after: String
         if let ota = await up.loaderPresent() {
             append("loader waiting: \(ota.text), resuming")
@@ -325,7 +364,7 @@ final class DeviceController {
         append("auto backup before install")
         identity = dev.identity
         do {
-            let s = try await makeSnapshot(dev: dev, fl: fl, name: "Before install · \(whoIsName(dev.identity))", withPackage: true)
+            let s = try await makeSnapshot(dev: dev, fl: fl, name: "Before install · \(whoIsName(dev.identity))")
             library.add(s)
         } catch {
             append("auto backup failed: \(error.localizedDescription)")
@@ -341,7 +380,7 @@ final class DeviceController {
         return w?.name ?? id.text
     }
 
-    /// Save the state of the FM-1: which firmware is on it (and its package, when the hub has it), plus the Felucca
+    /// Save the state of the FM-1: which firmware is on it with its package (found wherever it is), plus the Felucca
     /// archive when the firmware answers the backup protocol.
     func snapshot(name: String?) {
         guard !isBusy else { return }
@@ -354,7 +393,7 @@ final class DeviceController {
             let fl = FeluccaLink(link: dev.link)
             let s: Snapshot
             do {
-                s = try await makeSnapshot(dev: dev, fl: fl, name: name ?? whoIsName(dev.identity), withPackage: true)
+                s = try await makeSnapshot(dev: dev, fl: fl, name: name ?? whoIsName(dev.identity))
             } catch {
                 dev.link.close()
                 throw error
@@ -362,14 +401,17 @@ final class DeviceController {
             dev.link.close()
             library.add(s)
             j.title = s.name
-            j.message = s.hasArchive
-                ? "Saved: \(s.firmwareName)\(s.hasPackage ? " with its package" : "") and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))."
-                : "Saved: \(s.firmwareName)\(s.hasPackage ? " with its package" : ""). This firmware does not offer a music archive over USB; use its own backup tool for projects and presets."
+            let pkgText = s.hasPackage ? "its firmware package" : "no firmware package (see the backup for why)"
+            let musicText = s.hasArchive
+                ? "and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))"
+                : "but no music archive: this firmware does not offer one over USB"
+            j.message = "Saved \(s.firmwareName)\(s.version.map { " \($0)" } ?? ""): \(pkgText), \(musicText)."
+            if s.firmwareId != nil, let c = s.firmwareId.map({ Look.colour(for: $0) }) { j.colour = c }
             return j
         } onFailure: { _ in }
     }
 
-    private func makeSnapshot(dev: FM1Device, fl: FeluccaLink, name: String, withPackage: Bool) async throws -> Snapshot {
+    private func makeSnapshot(dev: FM1Device, fl: FeluccaLink, name: String) async throws -> Snapshot {
         let who = catalog.whoIs(dev.identity.text)
         var s = Snapshot(name: name, identity: dev.identity.text, firmwareId: who?.firmware?.id,
                          firmwareName: who?.firmware?.name ?? who?.name ?? dev.identity.text,
@@ -392,28 +434,43 @@ final class DeviceController {
         } else {
             feluccaBackupSupported = false
         }
-        // the package: the exact version when the hub has it, else the hub's current one of that family
-        if withPackage {
-            phase = .downloading(0)
-            do {
-                if dev.identity.text == FWSCPackage.stockV15Product {
-                    let pkg = try await packages.stockPackage(catalog.stock)
-                    try storePackage(pkg, in: &s, exact: true, version: "V15")
-                } else if let f = who?.firmware {
-                    let pkg = try await packages.package(for: f)
-                    try storePackage(pkg, in: &s, exact: who?.exact == true, version: f.version)
-                } else {
-                    s.notes = "No package saved: the hub's catalogue has no firmware that reports \(dev.identity.text). Attach one below if you know which firmware it is."
-                }
-            } catch {
-                append("package for the backup failed: \(error.localizedDescription)")
-                s.notes = "No package saved: \(error.localizedDescription) Attach it below once the network is back."
-            }
+        // the package: wherever it is
+        if let found = await findPackage(for: dev.identity.text, who: who) {
+            let (pkg, from) = found
+            try storePackage(pkg, in: &s)
+            append("package for \(dev.identity.text): \(from)")
+        } else {
+            s.notes = "No package found for \(dev.identity.text): not on the hub, not on this phone, not among the makers' GitHub releases. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
+            append("no package found for \(dev.identity.text)")
         }
         return s
     }
 
-    private func storePackage(_ pkg: FWSCPackage, in s: inout Snapshot, exact: Bool, version: String?) throws {
+    /// Where a package with this identity can be: the hub's catalogue, this phone, the maker's GitHub releases,
+    /// M-VAVE's server for official versions. The first hit wins. Returns the package and where it came from.
+    private func findPackage(for identity: String, who: WhoIs?) async -> (FWSCPackage, String)? {
+        if let f = who?.firmware, f.product == identity {
+            phase = .searching("The hub has \(f.name) \(f.version).")
+            if let p = try? await packages.package(for: f) { return (p, "hub") }
+        }
+        phase = .searching("Looking on this phone…")
+        if let p = packages.localPackage(product: identity) { return (p, "phone") }
+        if FWSCPackage.isOfficialProduct(identity) {
+            if identity == FWSCPackage.stockV15Product, let p = try? await packages.stockPackage(catalog.stock) { return (p, "hub (V15)") }
+            phase = .searching("Asking M-VAVE's server…")
+            if let p = try? await packages.officialLatest(), p.product == identity { return (p, "m-vave.com") }
+        }
+        let candidates = catalog.familyCandidates(for: identity)
+        if !candidates.isEmpty {
+            phase = .searching("Checking the makers' releases on GitHub…")
+            if let p = await packages.releasePackage(product: identity, candidates: candidates, onStatus: { t in Task { @MainActor in self.phase = .searching(t) } }) {
+                return (p, "GitHub release")
+            }
+        }
+        return nil
+    }
+
+    private func storePackage(_ pkg: FWSCPackage, in s: inout Snapshot) throws {
         let folder = library.folder(for: s)
         Paths.ensure(folder)
         try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
@@ -421,26 +478,23 @@ final class DeviceController {
         s.packageSHA256 = pkg.sha256
         s.packageSize = pkg.bytes.count
         s.product = pkg.product
-        s.packageExact = exact
-        if let v = version { s.version = v }
+        s.packageExact = pkg.product == s.identity
+        if let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
+        else if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
+        else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
+        s.notes = ""
     }
 
-    /// Attach a package to a backup made without one: the firmware's from the hub (or the official V15 when `firmware` is nil).
-    /// Returns an error text, or nil when it worked.
-    func attachPackage(to snapshot: Snapshot, firmware: Firmware?) async -> String? {
+    /// A backup made without a package, completed from a .fwsc the user picked in Files. Returns an error text or nil.
+    func attachPackage(to snapshot: Snapshot, fileURL url: URL) -> String? {
         var s = snapshot
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            if let f = firmware {
-                let pkg = try await packages.package(for: f)
-                try storePackage(pkg, in: &s, exact: f.product == s.identity, version: f.version)
-                s.firmwareId = f.id
-                s.firmwareName = f.name
-            } else {
-                let pkg = try await packages.stockPackage(catalog.stock)
-                try storePackage(pkg, in: &s, exact: s.identity == FWSCPackage.stockV15Product, version: "V15")
-                s.firmwareName = "Official firmware"
-            }
-            s.notes = ""
+            let pkg = try FWSCPackage(data: try Data(contentsOf: url))
+            guard pkg.product == s.identity else { return "That file is \(pkg.product); this backup needs \(s.identity)." }
+            packages.keep(pkg)
+            try storePackage(pkg, in: &s)
             library.update(s)
             return nil
         } catch {
@@ -458,7 +512,7 @@ final class DeviceController {
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
             try await autoSnapshotIfWanted()
             let fw = s.firmwareId.flatMap { catalog.firmware(id: $0) }
-            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isStockV15 || fw?.usesStockLoader == true)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: s.firmwareName, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .snapshot, success: true))
             j.message = "\(s.firmwareName) is back on your FM-1." + (s.hasArchive ? " Now restore the music archive from the same backup." : "")
@@ -481,7 +535,7 @@ final class DeviceController {
             let fl = FeluccaLink(link: dev.link)
             guard await FeluccaBackup.supported(fl) else {
                 dev.link.close()
-                throw FM1Error.protocolError("The firmware on the FM-1 (\(dev.identity.text)) does not answer the backup protocol. Install \(s.firmwareName) first, then restore.")
+                throw FM1Error.protocolError("The firmware on the FM-1 (\(dev.identity.text)) does not answer the backup protocol. Restore \(s.firmwareName) first, then the music.")
             }
             phase = .restoring(0, archive.totalBytes)
             do {

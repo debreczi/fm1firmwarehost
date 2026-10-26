@@ -59,6 +59,19 @@ struct FWSCPackage {
         return out
     }
 
+    /// M-VAVE's own firmware: "FM-1_015", "FM-1_016", ... (custom firmwares use 1xx and up).
+    var isOfficial: Bool { FWSCPackage.isOfficialProduct(product) }
+    /// "V16" for FM-1_016.
+    var officialVersion: String? { FWSCPackage.officialVersion(of: product) }
+
+    static func isOfficialProduct(_ p: String) -> Bool {
+        p.range(of: "^FM-1_0[0-9][0-9]$", options: .regularExpression) != nil
+    }
+    static func officialVersion(of p: String) -> String? {
+        guard isOfficialProduct(p), let n = Int(p.suffix(3)) else { return nil }
+        return "V\(n)"
+    }
+
     var isStockV15: Bool {
         bytes.count == FWSCPackage.stockV15Size && sha256 == FWSCPackage.stockV15SHA256 && product == FWSCPackage.stockV15Product
     }
