@@ -39,10 +39,10 @@ struct DeviceJob: Identifiable, Equatable {
     enum Kind: Equatable { case install, stock, resume, snapshot, restoreFirmware, restoreArchive, file }
     let id = UUID()
     let kind: Kind
-    let title: String
-    let subtitle: String
-    let colour: Color
-    let imageURL: URL?
+    var title: String
+    var subtitle: String
+    var colour: Color
+    var imageURL: URL?
     var finished = false
     var success = false
     var message = ""
