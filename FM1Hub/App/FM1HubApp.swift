@@ -24,6 +24,7 @@ struct FM1HubApp: App {
                 .environment(catalog)
                 .environment(library)
                 .environment(device)
+                .task { library.nameRecovered(using: catalog) }
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }

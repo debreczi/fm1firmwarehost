@@ -93,7 +93,7 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CURRENT_PROJECT_VERSION="$(date -u +%Y%m%d).${{ github.run_number }}" \
             archive 2>&1 | tee build/archive.log | grep -E 'error:|ARCHIVE|[Ss]igning|[Pp]rovisioning' || true
           grep -q 'ARCHIVE SUCCEEDED' build/archive.log || { tail -60 build/archive.log; exit 1; }
 
@@ -111,7 +111,7 @@ jobs:
             <key>signingStyle</key><string>automatic</string>
             <key>teamID</key><string>$APPLE_TEAM_ID</string>
             <key>uploadSymbols</key><true/>
-            <key>manageAppVersionAndBuildNumber</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
           </dict>
           </plist>
           PLIST
