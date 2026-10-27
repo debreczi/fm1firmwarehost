@@ -15,6 +15,7 @@ final class AppSettings {
     var sort: SortOrder { didSet { d.set(sort.rawValue, forKey: "sort") } }
     var gridView: Bool { didSet { d.set(gridView, forKey: "gridView") } }
     var selectedKinds: [String] { didSet { d.set(selectedKinds, forKey: "kinds") } }
+    var disclaimerAccepted: Bool { didSet { d.set(disclaimerAccepted, forKey: "disclaimerAccepted") } }
 
     init() {
         showBetas = d.object(forKey: "showBetas") as? Bool ?? true
@@ -25,5 +26,6 @@ final class AppSettings {
         sort = SortOrder(rawValue: d.string(forKey: "sort") ?? "") ?? .installs
         gridView = d.object(forKey: "gridView") as? Bool ?? false
         selectedKinds = d.stringArray(forKey: "kinds") ?? []
+        disclaimerAccepted = d.bool(forKey: "disclaimerAccepted")
     }
 }

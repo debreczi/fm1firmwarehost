@@ -69,8 +69,8 @@ One-time setup (needs a paid Apple Developer Program membership):
    | `ASC_KEY_P8` | the full text of the `.p8` file (or its base64) |
    | `APPLE_TEAM_ID` | the 10-character team ID |
 
-5. Push to `main` or run the workflow by hand (Actions → iOS → Run workflow). The build number is the workflow
-   run number; Xcode bumps it if App Store Connect already has it.
+5. Push to `main` or run the workflow by hand (Actions → iOS → Run workflow). The build number is
+   `yyyymmdd.run` (UTC date and the workflow run number, e.g. `20261027.9`); Settings in the app shows it.
 6. First build only: in App Store Connect → TestFlight, answer the export-compliance question (the app uses only
    HTTPS, so "standard encryption, exempt"), then add yourself as an internal tester. The TestFlight app on the phone
    installs it.

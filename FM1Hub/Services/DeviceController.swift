@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import UIKit
 
 /// What the device layer is doing right now, for the screens.
 enum DevicePhase: Equatable {
@@ -331,7 +332,11 @@ final class DeviceController {
         showJobSheet = true
         phase = .connecting
         statusMessage = ""
+        // a locked screen suspends the app and stops the transfer: stay awake while the FM-1 is written
+        let keepAwake = job.kind != .snapshot
+        if keepAwake { UIApplication.shared.isIdleTimerDisabled = true }
         task = Task {
+            defer { if keepAwake { UIApplication.shared.isIdleTimerDisabled = false } }
             var j = job
             do {
                 j = try await work()

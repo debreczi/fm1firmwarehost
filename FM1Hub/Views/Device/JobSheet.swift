@@ -32,6 +32,20 @@ struct JobSheet: View {
                     .padding(.vertical, 8)
                     Button("Done") { device.dismissJob() }.buttonStyle(PrimaryButtonStyle(tint: j.colour))
                 } else {
+                    if writes(j.kind) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "cable.connector.slash").font(.system(size: 28, weight: .bold))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("DO NOT UNPLUG YOUR FM-1").font(.system(size: 18, weight: .heavy, design: .rounded))
+                                Text("Keep it connected and keep this app open until it says Done.").font(.system(size: 13, weight: .medium))
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(hex: "#d32f2f")))
+                    }
                     VStack(spacing: 10) {
                         HStack {
                             ProgressView().tint(j.colour)
@@ -44,7 +58,7 @@ struct JobSheet: View {
                     }
                     .padding(14).card(tint: j.colour)
                     steps
-                    Label("Keep the FM-1 plugged in and this app open until it is done. About a minute.", systemImage: "hourglass")
+                    Label("About a minute.", systemImage: "hourglass")
                         .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
                     Button("Cancel") { device.cancel() }.buttonStyle(SecondaryButtonStyle()).disabled(!cancellable)
                 }
@@ -53,6 +67,14 @@ struct JobSheet: View {
         }
         .padding(20)
         .hubBackground()
+    }
+
+    /// Jobs that write to the FM-1 (a backup only reads it).
+    private func writes(_ k: DeviceJob.Kind) -> Bool {
+        switch k {
+        case .install, .official, .resume, .file, .restoreFirmware, .restoreArchive: return true
+        case .snapshot: return false
+        }
     }
 
     private func icon(for k: DeviceJob.Kind) -> String {
