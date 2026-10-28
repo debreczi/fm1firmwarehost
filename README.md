@@ -115,10 +115,17 @@ their own editors and backup tools; the app says so instead of pretending.
 
 ## Licence
 
-The repository's `LICENSE` is MIT, but the protocol code under `FM1Hub/Protocol/` is a Swift port of GPL-3.0-only code
-by Leo Kuroshita (@kurogedelic, Hügelton Instruments) from the hub's installer and the Felucca web editor. A build of
-this app is a derivative work and has to be distributed under the **GPL-3.0**. Either replace `LICENSE` with the GPL-3.0
-or keep the app for personal use. Each firmware in the catalogue has its own licence (shown on its card).
+GPL-3.0 (see `LICENSE` and `NOTICE.md`). The protocol code under `FM1Hub/Protocol/` is a Swift port of GPL-3.0-only
+code by Leo Kuroshita (@kurogedelic, Hügelton Instruments) from the hub's installer and the Felucca web editor. Each
+firmware in the catalogue has its own licence (shown on its card).
 
 Not affiliated with M-VAVE or with the hub. Flashing can leave a device needing a rescue; read the hub's
-[knowledge base](https://thefirmwarehub.com/kb/) first.
+[knowledge base](https://thefirmwarehub.com/kb/) first. Privacy: [PRIVACY.md](PRIVACY.md). Support: [SUPPORT.md](SUPPORT.md).
+
+## App Store
+
+`appstore/metadata/` holds the listing (fastlane `deliver` layout). The **App Store** workflow
+(`.github/workflows/appstore.yml`, run by hand) builds the app for the simulator, takes the screenshots in a demo mode
+(`-FM1Screenshots YES`, sample data in memory only, never on a real launch), uploads listing and screenshots, sets the
+price to free, fills the age rating, attaches the newest processed build to version 1.0, and prints the status of
+builds and versions. It never submits for review.

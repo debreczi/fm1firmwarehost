@@ -3,7 +3,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(DeviceController.self) private var device
     @Environment(CatalogStore.self) private var catalog
-    @State private var tab = 0
+    @State private var tab = Demo.isOn ? Demo.tab : 0
 
     var body: some View {
         @Bindable var device = device

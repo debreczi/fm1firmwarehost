@@ -24,7 +24,16 @@ struct FM1HubApp: App {
                 .environment(catalog)
                 .environment(library)
                 .environment(device)
-                .task { library.nameRecovered(using: catalog) }
+                .task {
+                    if Demo.isOn {
+                        settings.disclaimerAccepted = true
+                        if catalog.firmwares.isEmpty { await catalog.refresh(force: true) }
+                        library.seedDemo(catalog: catalog)
+                        device.seedDemo()
+                    } else {
+                        library.nameRecovered(using: catalog)
+                    }
+                }
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }

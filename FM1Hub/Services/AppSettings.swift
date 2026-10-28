@@ -15,7 +15,7 @@ final class AppSettings {
     var sort: SortOrder { didSet { d.set(sort.rawValue, forKey: "sort") } }
     var gridView: Bool { didSet { d.set(gridView, forKey: "gridView") } }
     var selectedKinds: [String] { didSet { d.set(selectedKinds, forKey: "kinds") } }
-    var disclaimerAccepted: Bool { didSet { d.set(disclaimerAccepted, forKey: "disclaimerAccepted") } }
+    var disclaimerAccepted: Bool { didSet { if !Demo.isOn { d.set(disclaimerAccepted, forKey: "disclaimerAccepted") } } }
 
     init() {
         showBetas = d.object(forKey: "showBetas") as? Bool ?? true
