@@ -8,6 +8,7 @@ struct FirmwareListView: View {
     @State private var query = ""
     @State private var showFilters = false
     @State private var confirm: Firmware?
+    @State private var path: [Firmware] = []
 
     private var selected: Set<String> { Set(settings.selectedKinds) }
 
@@ -38,7 +39,7 @@ struct FirmwareListView: View {
 
     var body: some View {
         @Bindable var settings = settings
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     if !settings.disclaimerAccepted { DisclaimerBox() }
@@ -70,6 +71,9 @@ struct FirmwareListView: View {
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search name, maker, what it does")
             .navigationTitle("Firmwares")
             .navigationDestination(for: Firmware.self) { FirmwareDetailView(firmware: $0) }
+            .onChange(of: catalog.firmwares.count, initial: true) { _, _ in
+                if Demo.isOn, path.isEmpty, let id = Demo.open, let f = catalog.firmware(id: id) { path = [f] }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {

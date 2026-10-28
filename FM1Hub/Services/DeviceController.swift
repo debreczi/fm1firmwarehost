@@ -118,7 +118,22 @@ final class DeviceController {
         midiPorts = engine.sources().map(\.name).filter { seen.insert($0).inserted }
     }
 
+    /// The screenshot mode: an FM-1 running Felucca, and optionally an install of X0X in progress.
+    func seedDemo() {
+        if let f = catalog.firmware(id: "felucca") { identity = FM1Identity.parse(text: f.product) }
+        identityDate = Date().addingTimeInterval(-90)
+        feluccaBackupSupported = true
+        officialLatest = "FM-1_016"
+        midiPorts = ["Felucca"]
+        if Demo.job, let x = catalog.firmware(id: "x0x") {
+            job = DeviceJob(kind: .install, title: x.name, subtitle: "\(x.version) · by \(x.author)", colour: Look.colour(for: x.id), imageURL: x.imageURL)
+            phase = .installing(.write(704))
+            showJobSheet = true
+        }
+    }
+
     private func setupChanged() {
+        if Demo.isOn { return }
         refreshPorts()
         if midiPorts.isEmpty, !isBusy {
             identity = nil
@@ -134,7 +149,7 @@ final class DeviceController {
 
     /// Asks M-VAVE's server which official version is current (and keeps the file). Quiet when offline.
     func checkOfficial() async {
-        guard !officialChecking else { return }
+        guard !officialChecking, !Demo.isOn else { return }
         officialChecking = true
         defer { officialChecking = false }
         if let p = try? await packages.officialLatest() {

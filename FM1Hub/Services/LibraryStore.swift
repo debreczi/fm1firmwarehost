@@ -14,8 +14,55 @@ final class LibraryStore {
     private(set) var snapshots: [Snapshot] = []
 
     init() {
+        if Demo.isOn { return }   // the screenshot mode never reads or writes the real library
         load()
         recoverSnapshots()
+    }
+
+    /// Sample backups and installs for the screenshot mode, in memory only (save() is never reached from here).
+    func seedDemo(catalog: CatalogStore) {
+        let now = Date()
+        func ago(_ h: Double) -> Date { now.addingTimeInterval(-h * 3600) }
+        func fw(_ id: String) -> Firmware? { catalog.firmware(id: id) }
+        var snaps: [Snapshot] = []
+        if let f = fw("felucca") {
+            var s = Snapshot(name: "Live set, October", identity: f.product, firmwareId: f.id, firmwareName: f.name, version: f.version,
+                             product: f.product, packageFile: "package.fwsc", packageSHA256: f.sha256, packageSize: f.size, packageExact: true,
+                             archiveFile: "felucca-backup.json", archiveBytes: 262_144 + 18_432, archiveObjects: 13)
+            s.date = ago(3)
+            snaps.append(s)
+        }
+        if let f = fw("melodee") {
+            var s = Snapshot(name: "Prophet patches", identity: f.product, firmwareId: f.id, firmwareName: f.name, version: f.version,
+                             product: f.product, packageFile: "package.fwsc", packageSHA256: f.sha256, packageSize: f.size, packageExact: true,
+                             archiveFile: "felucca-backup.json", archiveBytes: 23_040, archiveObjects: 13)
+            s.date = ago(30)
+            snaps.append(s)
+        }
+        var off = Snapshot(name: "Factory state", identity: "FM-1_016", firmwareId: nil, firmwareName: "Official firmware", version: "V16",
+                           product: "FM-1_016", packageFile: "package.fwsc", packageSHA256: nil, packageSize: 718_196, packageExact: true,
+                           archiveFile: nil, archiveBytes: nil, archiveObjects: nil)
+        off.date = ago(80)
+        snaps.append(off)
+        snapshots = snaps
+
+        var recs: [InstallRecord] = []
+        func rec(_ id: String, _ h: Double, ok: Bool = true, before: String?, err: String? = nil) {
+            guard let f = fw(id) else { return }
+            var r = InstallRecord(firmwareId: f.id, name: f.name, version: f.version, product: f.product, sha256: f.sha256,
+                                  identityBefore: before, identityAfter: ok ? f.product : nil, source: .hub, success: ok, error: err)
+            r.date = ago(h)
+            recs.append(r)
+        }
+        rec("felucca", 2, before: fw("x0x")?.product)
+        rec("x0x", 26, before: fw("melodee")?.product)
+        rec("melodee", 29, before: "FM-1_016")
+        var o = InstallRecord(firmwareId: nil, name: "Official firmware", version: "V16", product: "FM-1_016", sha256: nil,
+                              identityBefore: fw("zp12")?.product, identityAfter: "FM-1_016", source: .stock, success: true)
+        o.date = ago(52)
+        recs.append(o)
+        rec("zp12", 75, before: "FM-1_015")
+        history = recs.sorted { $0.date > $1.date }
     }
 
     private static func decoder() -> JSONDecoder {
@@ -44,12 +91,14 @@ final class LibraryStore {
     }
 
     private func save() {
+        if Demo.isOn { return }
         let lib = Library(history: history, snapshots: snapshots)
         if let data = try? LibraryStore.encoder().encode(lib) { try? data.write(to: Paths.library, options: .atomic) }
     }
 
     /// Each backup's own record, next to its files: the index can always be rebuilt from the folders.
     private func writeRecord(_ s: Snapshot) {
+        if Demo.isOn { return }
         let folder = Paths.ensure(folder(for: s))
         if let data = try? LibraryStore.encoder().encode(s) {
             try? data.write(to: folder.appendingPathComponent("snapshot.json"), options: .atomic)

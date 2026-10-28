@@ -1,0 +1,7 @@
+FM-1 Hub manages firmware for the M-VAVE FM-1, a small USB MIDI synthesizer. Installing, backing up and restoring need the physical device connected over USB (it is a class-compliant USB MIDI device; the app uses CoreMIDI and SysEx with the same update protocol as M-VAVE's own updater).
+
+Without the device you can review: the Firmwares tab (catalogue from thefirmwarehub.com, search, filters, detail pages), the FM-1 tab (Connect reports "No FM-1 found", official firmware section, help), the Backups and History tabs (empty until used), and Settings.
+
+The firmwares are open-source projects by independent authors, mirrored from their GitHub releases by The FM-1 Firmware Hub; the official firmware is downloaded from M-VAVE's public download server. The app does not run downloaded code on the iPhone: packages are only sent to the external FM-1 hardware. On first launch the app shows a risk disclaimer that must be accepted.
+
+No account or login is needed.

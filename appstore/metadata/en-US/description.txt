@@ -1,0 +1,30 @@
+FM-1 Hub turns your iPhone into a firmware manager for the M-VAVE FM-1 synthesizer. Browse the community's open-source firmwares, plug the FM-1 in over USB, and install one in about a minute. No computer, no account.
+
+BROWSE
+• The full catalogue of The FM-1 Firmware Hub: synths, grooveboxes, drum machines and samplers, chord instruments, trackers
+• Cards with each firmware's own screen, maker, version, popularity and description
+• Search, filters by type and style, sorting, list or grid
+• Details for every firmware: release date, size, licence, checksum, links to its project, source, editor and manual
+
+INSTALL
+• One tap to put a firmware on your FM-1 over USB
+• Every package is checked against its published SHA-256 before a single byte is written
+• An interrupted install continues where it stopped
+• One tap back to M-VAVE's official firmware, straight from M-VAVE's own download server
+
+BACK UP AND RESTORE
+• One-tap backup of the state of your FM-1: which firmware it runs and the firmware package itself, found automatically
+• On firmwares of the Felucca family, your music too: projects, presets, settings and samples
+• One-tap restore
+• Backups live on your phone and in the Files app, ready to copy to iCloud Drive
+
+HISTORY
+• Every install remembered: what went on, when, and whether it worked
+
+PRIVATE
+• No account, no tracking, no analytics. Everything stays on your phone.
+
+REQUIREMENTS
+• An M-VAVE FM-1 and a USB cable (iPhone 15 and newer: USB-C; older iPhones: Apple's Lightning to USB camera adapter)
+
+Installing firmware can leave a device needing recovery. Each firmware is the work and responsibility of its author. FM-1 Hub is an independent app, not made by or associated with M-VAVE or The FM-1 Firmware Hub. The app's source code is available under the GPL-3.0.
