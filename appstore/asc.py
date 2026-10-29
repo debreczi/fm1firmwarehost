@@ -46,10 +46,15 @@ print(f"App {app['attributes']['name']} ({BUNDLE}), id {APP}")
 
 
 def price():
-    sched = call("GET", f"/v1/apps/{APP}/appPriceSchedule/manualPrices", params={"limit": 5})
-    if sched.get("data"):
-        print("  price: already set")
-        return
+    try:
+        sched = call("GET", f"/v1/apps/{APP}/appPriceSchedule")["data"]
+        prices = call("GET", f"/v1/appPriceSchedules/{sched['id']}/manualPrices", params={"limit": 5}).get("data")
+        if prices:
+            print("  price: already set")
+            return
+    except RuntimeError as e:
+        if "404" not in str(e):
+            raise
     pts = call("GET", f"/v1/apps/{APP}/appPricePoints", params={"filter[territory]": "USA", "limit": 200})["data"]
     free = next(p for p in pts if float(p["attributes"]["customerPrice"]) == 0)
     call("POST", "/v1/appPriceSchedules", json={
@@ -91,8 +96,8 @@ def age_rating():
     decl = call("GET", f"/v1/appInfos/{info['id']}/ageRatingDeclaration")["data"]
     attrs = {}
     for k, v in decl["attributes"].items():
-        if v is not None or k in ("ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride", "kidsAgeBand",
-                                  "developerAgeRatingInfoUrl"):
+        # only the questions: overrides, regional classifications and links stay as Apple has them
+        if v is not None or k == "kidsAgeBand" or any(w in k for w in ("Override", "Classification", "Url", "Number")):
             continue
         attrs[k] = False if k in BOOL_KEYS or k.startswith("is") else "NONE"
     if not attrs:

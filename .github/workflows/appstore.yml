@@ -100,6 +100,7 @@ jobs:
         run: |
           gem list -i fastlane >/dev/null 2>&1 || sudo gem install fastlane -N --quiet
           fastlane --version | tail -1
+          echo '# all options are on the command line (.github/workflows/appstore.yml)' > Deliverfile
           fastlane deliver \
             --api_key_path ~/private_keys/api_key.json \
             --app_identifier com.debreczi.fm1hub \
