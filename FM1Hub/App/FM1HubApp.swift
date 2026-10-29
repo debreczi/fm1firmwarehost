@@ -27,7 +27,11 @@ struct FM1HubApp: App {
                 .task {
                     if Demo.isOn {
                         settings.disclaimerAccepted = true
-                        if catalog.firmwares.isEmpty { await catalog.refresh(force: true) }
+                        // the first launch loads the catalogue from the network: wait for it
+                        for _ in 0..<60 where catalog.firmwares.isEmpty {
+                            await catalog.refresh(force: true)
+                            if catalog.firmwares.isEmpty { try? await Task.sleep(nanoseconds: 500_000_000) }
+                        }
                         library.seedDemo(catalog: catalog)
                         device.seedDemo()
                     } else {
