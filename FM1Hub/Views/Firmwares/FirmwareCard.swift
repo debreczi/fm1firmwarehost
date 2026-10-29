@@ -58,9 +58,9 @@ struct FirmwareCard: View {
                     Button(action: onInstall) { Label(onDevice ? "Install again" : "Install", systemImage: "bolt.fill") }
                         .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
                 }
-                NavigationLink(value: firmware) { Image(systemName: "info.circle").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 42) }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .frame(width: 48)
+                NavigationLink(value: firmware) { Image(systemName: "info.circle") }
+                    .buttonStyle(IconButtonStyle())
+                    .accessibilityLabel("Details")
             }
             .padding(14)
         }

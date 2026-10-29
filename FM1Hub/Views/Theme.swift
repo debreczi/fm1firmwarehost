@@ -88,6 +88,18 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// A square key with one symbol, the height of the primary button next to it.
+struct IconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.6 : 0.92))
+            .frame(width: 44, height: 42)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceRaised))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+    }
+}
+
 extension Date {
     var shortText: String {
         let f = DateFormatter()

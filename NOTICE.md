@@ -13,6 +13,9 @@ The update and backup protocol code in `FM1Hub/Protocol/` is a Swift port of GPL
 (@kurogedelic), Hügelton Instruments, from the installer of The FM-1 Firmware Hub (thefirmwarehub.com) and the Felucca
 web editor (github.com/hugelton/Felucca). Each ported file carries its SPDX header and the original copyright notice.
 
+Before App Store distribution, the author was asked about it. He has no objection as long as the app remains open
+source under the GPL-3.0, which is why the complete source of every released version stays public in this repository.
+
 ## Not affiliated
 
 This app is not made by, endorsed by or associated with M-VAVE or The FM-1 Firmware Hub. "M-VAVE" and "FM-1" are used
