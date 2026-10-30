@@ -78,8 +78,11 @@ jobs:
           chmod 600 ~/private_keys/AuthKey_$ASC_KEY_ID.p8
           echo "ASC_KEY_PATH=$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
 
-      - name: Archive (Xcode cloud-managed signing)
+      - name: Archive (unsigned)
         if: steps.secrets.outputs.ready == 'true'
+        # Unsigned on purpose: signing here makes Xcode create a new development certificate on every fresh runner,
+        # and Apple's account limit fills up. The export below signs once, with Apple's cloud-managed distribution
+        # certificate, which is kept at Apple and reused.
         run: |
           set -o pipefail
           mkdir -p build
@@ -87,14 +90,10 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath build/FM1Hub.xcarchive \
             -derivedDataPath build/DerivedData \
-            -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             CURRENT_PROJECT_VERSION="$(date -u +%Y%m%d).${{ github.run_number }}" \
-            archive 2>&1 | tee build/archive.log | grep -E 'error:|ARCHIVE|[Ss]igning|[Pp]rovisioning' || true
+            archive 2>&1 | tee build/archive.log | grep -E 'error:|ARCHIVE' || true
           grep -q 'ARCHIVE SUCCEEDED' build/archive.log || { tail -60 build/archive.log; exit 1; }
 
       - name: Upload to TestFlight
