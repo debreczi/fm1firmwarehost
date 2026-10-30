@@ -148,10 +148,75 @@ def report():
     print("\nApp Store versions:")
     for x in call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"limit": 10})["data"]:
         a = x["attributes"]
-        print(f"  {a['platform']} {a['versionString']}: {a.get('appVersionState') or a.get('appStoreState')}")
+        print(f"  {a['platform']} {a['versionString']}: {a.get('appVersionState') or a.get('appStoreState')}, release {a.get('releaseType')}")
 
 
-print("Chores:")
-for name, fn in [("price", price), ("availability", availability), ("age rating", age_rating), ("build", attach_build)]:
-    step(name, fn)
+def newest_valid():
+    b = call("GET", "/v1/builds", params={"filter[app]": APP, "filter[processingState]": "VALID",
+                                          "sort": "-uploadedDate", "limit": 1})["data"]
+    return b[0] if b else None
+
+
+def beta(group_name=os.environ.get("BETA_GROUP", "Public Beta")):
+    """The newest processed build to an external TestFlight group, with its beta review submitted."""
+    b = newest_valid()
+    if not b:
+        print("  beta: no processed build")
+        return
+    ver = b["attributes"]["version"]
+    groups = call("GET", "/v1/betaGroups", params={"filter[app]": APP, "limit": 50})["data"]
+    g = next((x for x in groups if x["attributes"]["name"] == group_name), None)
+    if not g:
+        print(f"  beta: no group named {group_name!r} (groups: {', '.join(x['attributes']['name'] for x in groups)})")
+        return
+    # what to test, shown to testers
+    notes = os.environ.get("WHAT_TO_TEST", "").strip()
+    if notes:
+        locs = call("GET", f"/v1/builds/{b['id']}/betaBuildLocalizations")["data"]
+        loc = next((l for l in locs if l["attributes"]["locale"] == "en-US"), None)
+        if loc:
+            call("PATCH", f"/v1/betaBuildLocalizations/{loc['id']}",
+                 json={"data": {"type": "betaBuildLocalizations", "id": loc["id"], "attributes": {"whatsNew": notes}}})
+        else:
+            call("POST", "/v1/betaBuildLocalizations", json={"data": {"type": "betaBuildLocalizations",
+                 "attributes": {"locale": "en-US", "whatsNew": notes},
+                 "relationships": {"build": {"data": {"type": "builds", "id": b["id"]}}}}})
+        print("  beta: 'What to Test' set")
+    have = {x["id"] for x in call("GET", f"/v1/betaGroups/{g['id']}/builds", params={"limit": 50})["data"]}
+    if b["id"] in have:
+        print(f"  beta: {ver} already in {group_name}")
+    else:
+        call("POST", f"/v1/betaGroups/{g['id']}/relationships/builds", json={"data": [{"type": "builds", "id": b["id"]}]})
+        print(f"  beta: added {ver} to {group_name}")
+    detail = call("GET", f"/v1/builds/{b['id']}/buildBetaDetail")["data"]["attributes"]
+    state = detail.get("externalBuildState")
+    if state in ("READY_FOR_BETA_SUBMISSION", "MISSING_EXPORT_COMPLIANCE", None):
+        call("POST", "/v1/betaAppReviewSubmissions",
+             json={"data": {"type": "betaAppReviewSubmissions", "relationships": {"build": {"data": {"type": "builds", "id": b["id"]}}}}})
+        print(f"  beta: {ver} submitted for beta review")
+    else:
+        print(f"  beta: {ver} external state {state}")
+
+
+def manual_release():
+    v = version()
+    if v is None:
+        return
+    if v["attributes"].get("releaseType") == "MANUAL":
+        print(f"  release: {VERSION} already manual")
+        return
+    call("PATCH", f"/v1/appStoreVersions/{v['id']}",
+         json={"data": {"type": "appStoreVersions", "id": v["id"], "attributes": {"releaseType": "MANUAL"}}})
+    print(f"  release: {VERSION} set to manual release")
+
+
+TASKS = [t.strip() for t in os.environ.get("ASC_TASKS", "chores").split(",") if t.strip()]
+print("Tasks:", ", ".join(TASKS))
+if "chores" in TASKS:
+    for name, fn in [("price", price), ("availability", availability), ("age rating", age_rating), ("build", attach_build)]:
+        step(name, fn)
+if "beta" in TASKS:
+    step("beta", beta)
+if "manual" in TASKS:
+    step("manual release", manual_release)
 step("report", report)
