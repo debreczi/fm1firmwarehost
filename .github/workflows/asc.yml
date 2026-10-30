@@ -1,0 +1,36 @@
+name: App Store Connect
+
+# Quick App Store Connect tasks, no build. Run by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "Comma list: beta (newest build to Public Beta + beta review), manual (manual release), chores, or leave empty for a status report"
+        default: "beta,manual"
+      what_to_test:
+        description: "'What to Test' text for the beta build (optional)"
+        default: ""
+
+jobs:
+  asc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      ASC_TASKS: ${{ inputs.tasks }}
+      WHAT_TO_TEST: ${{ inputs.what_to_test }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run
+        run: |
+          mkdir -p ~/private_keys
+          if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$ASC_KEY_P8" > ~/private_keys/key.p8
+          else
+            printf '%s' "$ASC_KEY_P8" | base64 --decode > ~/private_keys/key.p8
+          fi
+          export ASC_KEY_PATH=~/private_keys/key.p8
+          pip install --quiet pyjwt cryptography requests
+          python3 appstore/asc.py
