@@ -126,7 +126,7 @@ struct DevicePill: View {
                 let w = device.whoIs
                 Text("On your FM-1: ").foregroundStyle(Theme.textDim) +
                 Text(w?.firmware?.name ?? w?.name ?? id.text).fontWeight(.semibold) +
-                Text(w?.firmware != nil ? (w?.exact == true ? " \(w!.firmware!.version)" : " (another version: \(id.text))") : "").foregroundStyle(Theme.textDim)
+                Text(w?.firmware != nil ? (w?.exact == true ? " \(w!.firmware!.version)" : " (reports \(id.text))") : "").foregroundStyle(Theme.textDim)
             } else {
                 Text(device.phase == .connecting ? "Looking for the FM-1…" : "Not connected").foregroundStyle(Theme.textDim)
             }

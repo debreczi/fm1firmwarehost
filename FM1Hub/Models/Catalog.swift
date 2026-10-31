@@ -121,9 +121,9 @@ struct Firmware: Codable, Identifiable, Hashable {
     /// a firmware built on another can keep that one's name with its own base version ("SLOOP 2.4.1"). What the hub adds
     /// after a dash is not in the firmware's words: the hub's MYCELIUM 1.0-test says "MYCELIUM 1.0".
     static func named(_ reported: String?, among all: [Firmware]) -> Firmware? {
-        guard let said = reported?.trimmingCharacters(in: .whitespaces).lowercased(), !said.isEmpty else { return nil }
+        guard let said = reported.map({ EditorInfo.plain($0).trimmingCharacters(in: .whitespaces).lowercased() }), !said.isEmpty else { return nil }
         let hits = all.filter {
-            let full = "\($0.name) \($0.version)".lowercased()
+            let full = EditorInfo.plain("\($0.name) \($0.version)").lowercased()
             return full == said || full.hasPrefix(said + "-")
         }
         return hits.count == 1 ? hits[0] : nil
@@ -131,8 +131,9 @@ struct Firmware: Codable, Identifiable, Hashable {
 
     /// The version a device's own words give for this firmware, if they name it: "2.8.3" from "SLOOP 2.8.3".
     func versionSaid(in reported: String?) -> String? {
-        guard let said = reported?.trimmingCharacters(in: .whitespaces), said.lowercased().hasPrefix(name.lowercased() + " ") else { return nil }
-        let rest = said.dropFirst(name.count + 1)
+        let own = EditorInfo.plain(name)
+        guard let said = reported.map({ EditorInfo.plain($0).trimmingCharacters(in: .whitespaces) }), said.lowercased().hasPrefix(own.lowercased() + " ") else { return nil }
+        let rest = said.dropFirst(own.count + 1)
         return rest.first?.isNumber == true ? String(rest) : nil
     }
 

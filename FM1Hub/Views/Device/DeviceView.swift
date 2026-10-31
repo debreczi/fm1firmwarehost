@@ -50,6 +50,13 @@ struct DeviceView: View {
         }
     }
 
+    private func versionLine(_ f: Firmware, exact: Bool, reports: String) -> String {
+        if exact { return "\(f.version) · the newest · by \(f.author)" }
+        // what it says is not always what the hub calls that build: this says only what is known
+        if let said = f.versionSaid(in: device.reportedName) { return "says it is \(said) · the hub has \(f.version) · reports \(reports)" }
+        return "another version than the hub's \(f.version) · reports \(reports)"
+    }
+
     private var statusCard: some View {
         let who = device.whoIs
         let c = who?.firmware.map { Look.colour(for: $0.id) } ?? Theme.accent
@@ -63,7 +70,7 @@ struct DeviceView: View {
                     if let id = device.identity {
                         Text(who?.firmware?.name ?? who?.name ?? id.text).font(.system(size: 22, weight: .bold, design: .rounded))
                         if let f = who?.firmware {
-                            Text(who?.exact == true ? "\(f.version) · the newest · by \(f.author)" : "another version than the hub's \(f.version) · reports \(id.text)")
+                            Text(versionLine(f, exact: who?.exact == true, reports: id.text))
                                 .font(.system(size: 13, design: .rounded)).foregroundStyle(Theme.textDim)
                         } else {
                             Text("reports \(id.text)").font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.textDim)

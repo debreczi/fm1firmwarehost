@@ -179,6 +179,8 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA sloopDX 4.0 BETA"), "sloopDX 4.0", "a release build of a fork")
         XCTAssertEqual(EditorInfo.ownName(of: "X0X 1.1.0 BETA"), "X0X 1.1.0")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA 2.4 BETA"), "Felucca 2.4")
+        XCTAssertEqual(EditorInfo.ownName(of: "CARAVEL v0.7.1"), "CARAVEL 0.7.1", "a v before the version is not part of it")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA MELODEE v1.2"), "MELODEE 1.2")
         XCTAssertEqual(EditorInfo.ownName(of: "DRUM-DEV"), "DRUM-DEV")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA "), "FELUCCA ")
     }
@@ -329,17 +331,21 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertEqual(archive.objects.first { $0.id == 100 }?.bytes, fork.objects[100])
     }
 
-    func testObjectsOnlyItsOwnEditorKnowsAreNeverWrittenBackByTheApp() async throws {
+    func testObjectsTheAppHasNotHeardOfAreNeverWrittenBackByIt() async throws {
         let fork = Self.aDevice()
         fork.objects[14] = Self.bytes(100, seed: 14)   // Clipper's, whose editor writes it after the projects
-        let archive = try await capture(fork)
+        var archive = try await capture(fork)
         let device = Self.aDevice()
         do {
             try await restore(archive, to: device)
             XCTFail("the app does not know where object 14 goes")
         } catch {
-            XCTAssertEqual(error.localizedDescription, SloopBackup.ownEditorOnly)
+            XCTAssertEqual(error.localizedDescription, SloopBackup.newerObjects, "on SLOOP, it is a later SLOOP's")
             XCTAssertTrue(device.writes.isEmpty)
+        }
+        archive.firmware = "FELUCCA CLIPPER 1.3"
+        XCTAssertThrowsError(try SloopBackup.validate(archive)) { error in
+            XCTAssertEqual(error.localizedDescription, SloopBackup.ownEditorOnly)
         }
     }
 

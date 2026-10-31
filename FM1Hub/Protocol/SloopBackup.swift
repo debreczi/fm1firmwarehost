@@ -42,19 +42,22 @@ struct EditorInfo: Equatable {
     let paramCount: Int
     let protocolVersion: Int    // 0 on firmware older than protocol v5
 
+    /// "CARAVEL v0.7.1" and "CARAVEL 0.7.1" are the same words.
+    static func plain(_ words: String) -> String {
+        words.replacingOccurrences(of: #" [vV](?=[0-9])"#, with: " ", options: .regularExpression)
+    }
+
     /// The firmware's own name: "SLOOP 2.8.4". This protocol's firmwares send it after Felucca's. Felucca itself sends
     /// only its version there ("FELUCCA v1.8.0"), which makes it "Felucca 1.8.0". A release build of many of them adds
     /// " BETA" to the version the hub knows ("FELUCCA sloopDX 4.0 BETA").
     static func ownName(of version: String) -> String {
         let suffix = " BETA"
-        let words = version.hasSuffix(suffix) ? String(version.dropLast(suffix.count)) : version
+        let words = plain(version.hasSuffix(suffix) ? String(version.dropLast(suffix.count)) : version)
         let prefix = "FELUCCA "
         guard words.hasPrefix(prefix) else { return words }
         let rest = words.dropFirst(prefix.count)
         guard let first = rest.first else { return words }
-        if first.isNumber { return "Felucca \(rest)" }
-        if first == "v", rest.dropFirst().first?.isNumber == true { return "Felucca \(rest.dropFirst())" }
-        return String(rest)
+        return first.isNumber ? "Felucca \(rest)" : String(rest)
     }
     var name: String { EditorInfo.ownName(of: version) }
 
@@ -107,6 +110,8 @@ enum SloopBackup {
     static let optionalIds: Set<Int> = [8, 9, 10, 11]
     /// What the app says of an archive it can't write back.
     static let ownEditorOnly = "The app can only put music back on SLOOP. This firmware's own web editor may open the file: share the files from this backup and try it there before you rely on it."
+    /// What it says of a SLOOP archive holding objects from a later SLOOP than this app has heard of.
+    static let newerObjects = "This backup holds something this version of the app does not know. SLOOP's own web editor can put it back: share the files from this backup and open the sloop-backup file there."
     /// Far above any object an FM-1 can hold: a manifest may not make the phone allocate more than this for one.
     static let maxObjectSize = 1 << 20
 
@@ -208,7 +213,9 @@ enum SloopBackup {
         guard file.format == SloopArchive.formatName, file.version == 1 else { throw FM1Error.package("Not a SLOOP backup.") }
         var all: [Int: [UInt8]] = [:]
         for o in file.objects {
-            guard restoreOrder.contains(o.id) || sampleIds.contains(o.id) else { throw FM1Error.package(ownEditorOnly) }
+            guard restoreOrder.contains(o.id) || sampleIds.contains(o.id) else {
+                throw FM1Error.package(EditorInfo.isSloop(file.firmware) ? newerObjects : ownEditorOnly)
+            }
             guard all[o.id] == nil, o.len >= 0, o.len <= maxObjectSize, let bytes = o.bytes else {
                 throw FM1Error.package("Invalid backup object.")
             }

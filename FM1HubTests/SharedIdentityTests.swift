@@ -189,6 +189,17 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertEqual(catalog().whoIs("FM-1_000")?.name, "the USB rescue mode (FM-1_000)")
     }
 
+    func testAVBeforeTheVersionIsNotPartOfIt() {
+        let c = catalog(extra: [Self.entry("caravel", "Caravel", "0.7.2", "FM-1_999"), Self.entry("sharer", "Sharer", "v1.2", "FM-1_900")])
+        let older = c.whoIs("FM-1_999", named: EditorInfo.ownName(of: "CARAVEL v0.7.1"))
+        XCTAssertEqual(older?.firmware?.id, "caravel")
+        XCTAssertEqual(older?.exact, false, "so the hub's 0.7.2 is not taken for it")
+        XCTAssertEqual(older?.firmware?.versionSaid(in: "CARAVEL v0.7.1"), "0.7.1")
+        XCTAssertEqual(c.whoIs("FM-1_999", named: "CARAVEL v0.7.2")?.exact, true)
+        XCTAssertEqual(c.whoIs("FM-1_900", named: "SHARER 1.2")?.firmware?.id, "sharer", "the hub can write it either way too")
+        XCTAssertEqual(c.whoIs("FM-1_900", named: "SHARER 1.2")?.exact, true)
+    }
+
     func testWhatTheHubAddsAfterADashIsNotInTheFirmwaresWords() {
         let c = catalog(extra: [Self.entry("mycelium", "MYCELIUM", "1.0-test", "FM-1_900")])
         let w = c.whoIs("FM-1_900", named: "MYCELIUM 1.0")
