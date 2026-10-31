@@ -17,7 +17,7 @@ final class PackageStoreTests: XCTestCase {
         XCTAssertTrue(PackageStore.carries(version: "1.0.9", "BEETLE-RC1.0.9.fwsc"))
     }
 
-    func testAWholeNumberVersionMustBeTheWholeTag() {
+    func testAWholeNumberVersionMustEndTheTag() {
         XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.0", asset: "sid1-1.0.0.fwsc"))
         XCTAssertFalse(PackageStore.isVersion("1", tag: "1.2", asset: "zen-1-1.2.fwsc"))
         XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.1", asset: "mnm1-1.0.1.fwsc"))
