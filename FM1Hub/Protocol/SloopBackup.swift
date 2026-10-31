@@ -41,12 +41,15 @@ struct EditorInfo: Equatable {
     let protocolVersion: Int    // 0 on firmware older than protocol v5
 
     /// The firmware's own name: "SLOOP 2.8.4". This protocol's firmwares send it after Felucca's. Felucca itself sends
-    /// only its version there ("FELUCCA v1.8.0"), which makes it "Felucca 1.8.0".
+    /// only its version there ("FELUCCA v1.8.0"), which makes it "Felucca 1.8.0". A release build of many of them adds
+    /// " BETA" to the version the hub knows ("FELUCCA sloopDX 4.0 BETA").
     static func ownName(of version: String) -> String {
+        let suffix = " BETA"
+        let words = version.hasSuffix(suffix) ? String(version.dropLast(suffix.count)) : version
         let prefix = "FELUCCA "
-        guard version.hasPrefix(prefix) else { return version }
-        let rest = version.dropFirst(prefix.count)
-        guard let first = rest.first else { return version }
+        guard words.hasPrefix(prefix) else { return words }
+        let rest = words.dropFirst(prefix.count)
+        guard let first = rest.first else { return words }
         if first.isNumber { return "Felucca \(rest)" }
         if first == "v", rest.dropFirst().first?.isNumber == true { return "Felucca \(rest.dropFirst())" }
         return String(rest)

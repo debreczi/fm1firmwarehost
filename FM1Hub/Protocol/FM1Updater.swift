@@ -168,7 +168,6 @@ final class FM1Updater {
     /// Full install: running firmware -> loader -> new firmware. Returns the identity the device reports after.
     func install(image: [UInt8], product: String, beforeWriting: BeforeWriting = { _ in },
                  onStep: @escaping (InstallStep) -> Void) async throws -> String {
-        cancelled = false
         guard let dev = await find({ !$0.isLoader }) else {
             if cancelled { throw FM1Error.cancelled }
             throw FM1Error.notFound("FM-1 not found (USB cable, and no other app using it?)" + seen())
@@ -257,7 +256,6 @@ final class FM1Updater {
     /// the official family is written from the official loader, as M-UPGRADE would.
     func resume(image: [UInt8], expectedProduct: String, stockLoader: Bool, beforeWriting: BeforeWriting = { _ in },
                 onStep: @escaping (InstallStep) -> Void) async throws -> ResumeOutcome {
-        cancelled = false
         guard let ota = await find({ $0.isLoader }) else {
             if cancelled { throw FM1Error.cancelled }
             return .noLoader

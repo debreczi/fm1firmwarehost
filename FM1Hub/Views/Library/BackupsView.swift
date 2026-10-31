@@ -138,6 +138,7 @@ struct SnapshotDetailView: View {
                         } else if !snapshot.packageExact {
                             Text("The FM-1 reported \(snapshot.identity). The package saved is \(snapshot.firmwareName) \(snapshot.version ?? ""), which may not be the version that was on it.")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
+                            AttachPackageView(snapshot: $snapshot)
                         }
                     } else {
                         if !sharing.isEmpty {
@@ -239,10 +240,10 @@ struct FirmwareChoiceView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("\(firmwares.count > 1 ? "Several firmwares" : firmwares[0].name) can report \(snapshot.identity). Choose what was on your FM-1 when you made this backup, and the hub's package of it goes into the backup. The hub keeps only each firmware's newest version.")
                     .font(.system(size: 14)).foregroundStyle(Theme.textDim)
-                if let said = snapshot.reportedName, firmwares.contains(where: { $0.versionSaid(in: said) != nil }) {
+                if let said = snapshot.reportedName, !Firmware.saidName(said, among: firmwares, identity: snapshot.identity).isEmpty {
                     Text("It called itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
                 }
-                ForEach(Firmware.likeliestFirst(firmwares, reported: snapshot.reportedName, lastInstalled: last)) { f in
+                ForEach(Firmware.likeliestFirst(firmwares, identity: snapshot.identity, reported: snapshot.reportedName, lastInstalled: last)) { f in
                     Button { device.attachFirmware(f, to: snapshot); dismiss() } label: {
                         HStack(spacing: 12) {
                             HubImage(url: f.imageURL, tint: Look.colour(for: f.id)).frame(width: 56, height: 44).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

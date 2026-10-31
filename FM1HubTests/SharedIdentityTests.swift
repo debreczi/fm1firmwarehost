@@ -162,6 +162,33 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertEqual(c.whoIs("FM-1_916", named: said)?.exact, false)
     }
 
+    /// What the hub's real packages say, on the numbers they really report.
+    func testRealFirmwaresOnASharedNumberAreNotNamedAfterAnother() {
+        let c = catalog(extra: [
+            Self.entry("waveloop", "WaveLoop FM-1", "1.0.5.2-midi23", "FM-1_910"),
+            Self.entry("dungeontracker", "Dungeon Tracker", "1.0.0", "FM-1_910"),
+            Self.entry("sloopdx", "sloopDX", "4.0", "FM-1_940", ident: #"FM-1_93[0-689]|FM-1_940"#),
+            Self.entry("x0x", "X0X", "1.1.0", "FM-1_9010100", ident: #"FM-1_90\\d{5}"#)
+        ])
+        for words in ["FELUCCA v1.0.5.2-midi23", "FELUCCA v1.0"] {
+            XCTAssertNil(c.whoIs("FM-1_910", named: EditorInfo.ownName(of: words))?.firmware, "\(words): Felucca's range covers the number, but others have it")
+        }
+        let dx = c.whoIs("FM-1_940", named: EditorInfo.ownName(of: "FELUCCA sloopDX 4.0 BETA"))
+        XCTAssertEqual(dx?.firmware?.id, "sloopdx")
+        XCTAssertEqual(dx?.exact, true, "its release build is the hub's 4.0")
+        XCTAssertEqual(c.whoIs("FM-1_9010100", named: EditorInfo.ownName(of: "X0X 1.1.0 BETA"))?.exact, true)
+    }
+
+    func testAFirmwareSayingARangeFirmwaresNameIsNotPutFirstWhereOthersOwnTheNumber() {
+        let c = catalog(extra: [Self.entry("waveloop", "WaveLoop FM-1", "1.0.5.2-midi23", "FM-1_910", installs: 1), Self.entry("maku", "MAKU", "1.0", "FM-1_910", installs: 2)])
+        let list = Firmware.likeliestFirst(c.firmwares(reporting: "FM-1_910"), identity: "FM-1_910", reported: "Felucca 1.0.5.2-midi23", lastInstalled: nil)
+        XCTAssertEqual(list.first?.id, "maku", "the most installed, not Felucca")
+    }
+
+    func testTheRescueModeIsNotCalledOfficial() {
+        XCTAssertEqual(catalog().whoIs("FM-1_000")?.name, "the USB rescue mode (FM-1_000)")
+    }
+
     func testTheVersionAFirmwareSays() throws {
         let sloop = try XCTUnwrap(catalog().firmware(id: "sloop"))
         XCTAssertEqual(sloop.versionSaid(in: "SLOOP 2.8.3"), "2.8.3")
@@ -199,9 +226,9 @@ final class SharedIdentityTests: XCTestCase {
 
     func testTheLikeliestComeFirst() {
         let all = catalog().firmwares(reporting: "FM-1_900")
-        XCTAssertEqual(Firmware.likeliestFirst(all, reported: nil, lastInstalled: nil).map(\.id), ["hortator", "hortator-bt", "sloop"], "the most installed first")
-        XCTAssertEqual(Firmware.likeliestFirst(all, reported: nil, lastInstalled: "hortator-bt").first?.id, "hortator-bt")
-        XCTAssertEqual(Firmware.likeliestFirst(all, reported: "SLOOP 2.4.1", lastInstalled: "hortator-bt").first?.id, "sloop", "what it calls itself counts for more")
+        XCTAssertEqual(Firmware.likeliestFirst(all, identity: "FM-1_900", reported: nil, lastInstalled: nil).map(\.id), ["hortator", "hortator-bt", "sloop"], "the most installed first")
+        XCTAssertEqual(Firmware.likeliestFirst(all, identity: "FM-1_900", reported: nil, lastInstalled: "hortator-bt").first?.id, "hortator-bt")
+        XCTAssertEqual(Firmware.likeliestFirst(all, identity: "FM-1_900", reported: "SLOOP 2.4.1", lastInstalled: "hortator-bt").first?.id, "sloop", "what it calls itself counts for more")
     }
 
     // MARK: What the screens claim

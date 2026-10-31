@@ -132,6 +132,14 @@ struct Firmware: Codable, Identifiable, Hashable {
         return rest.first?.isNumber == true ? String(rest) : nil
     }
 
+    /// Those among the firmwares an identity may be whose name the device said, with any version. Where firmwares have
+    /// this identity as their package's, another's range says nothing: WaveLoop, on FM-1_910, says "FELUCCA v1.0.5.2-midi23",
+    /// and Felucca's range covers that number.
+    static func saidName(_ reported: String?, among all: [Firmware], identity: String) -> [Firmware] {
+        let owners = all.filter { $0.product == identity }
+        return (owners.isEmpty ? all : owners).filter { $0.versionSaid(in: reported) != nil }
+    }
+
     /// Did the device itself name this very package, on this identity?
     func isNamed(by reported: String?, identity: String) -> Bool {
         product == identity && Firmware.named(reported, among: [self]) != nil
@@ -139,9 +147,10 @@ struct Firmware: Codable, Identifiable, Hashable {
 
     /// Those sharing an identity, the likeliest first: the one whose name the device used, the one last installed with
     /// this app, then the most installed.
-    static func likeliestFirst(_ all: [Firmware], reported: String?, lastInstalled: String?) -> [Firmware] {
+    static func likeliestFirst(_ all: [Firmware], identity: String, reported: String?, lastInstalled: String?) -> [Firmware] {
+        let said = saidName(reported, among: all, identity: identity)
         func rank(_ f: Firmware) -> Int {
-            if f.versionSaid(in: reported) != nil { return 0 }
+            if said.contains(f) { return 0 }
             return f.id == lastInstalled ? 1 : 2
         }
         return all.sorted {

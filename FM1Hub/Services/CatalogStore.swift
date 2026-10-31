@@ -110,14 +110,14 @@ final class CatalogStore {
         guard let text = text, !text.isEmpty else { return nil }
         let may = firmwares(reporting: text)
         let official = FWSCPackage.officialVersion(of: text)
-        if let v = official, may.isEmpty { return WhoIs(firmware: nil, exact: true, name: "the official firmware (\(v))") }
         if text == "FM-1_000" { return WhoIs(firmware: nil, exact: true, name: "the USB rescue mode (FM-1_000)") }
+        if let v = official, may.isEmpty { return WhoIs(firmware: nil, exact: true, name: "the official firmware (\(v))") }
         if text.lowercased().hasPrefix("ota-") { return WhoIs(firmware: nil, exact: true, name: "the update loader (\(text))") }
         if let f = Firmware.named(reported, among: may), f.product == text { return WhoIs(firmware: f, exact: true, name: f.name) }
         if let v = official { return WhoIs(firmware: nil, exact: false, name: (may.map(\.name) + ["the official firmware (\(v))"]).joined(separator: " or ")) }
         let owners = may.filter { $0.product == text }
         if owners.count == 1 { return WhoIs(firmware: owners[0], exact: owners[0].versionSaid(in: reported) == nil, name: owners[0].name) }
-        let sameName = may.filter { $0.versionSaid(in: reported) != nil }
+        let sameName = Firmware.saidName(reported, among: may, identity: text)
         if sameName.count == 1 { return WhoIs(firmware: sameName[0], exact: false, name: sameName[0].name) }
         let list = owners.isEmpty ? may : owners
         if list.count == 2 { return WhoIs(firmware: nil, exact: false, name: list.map(\.name).joined(separator: " or ")) }

@@ -302,7 +302,7 @@ final class DeviceController {
             try? packages.keep(pkg)
             let who = catalog.whoIs(pkg.product)
             let known = catalog.firmwares.first { $0.sha256 == pkg.sha256 }
-            j.title = known?.name ?? who?.name ?? pkg.product
+            j.title = known?.name ?? (catalog.identityIsAmbiguous(pkg.product) ? url.lastPathComponent : who?.name ?? pkg.product)
             j.subtitle = known.map { "\($0.version) · \(url.lastPathComponent)" } ?? url.lastPathComponent
             if let k = known { j.colour = Look.colour(for: k.id); j.imageURL = k.imageURL }
             try await autoSnapshotIfWanted()
@@ -497,6 +497,7 @@ final class DeviceController {
             }
             self.job = j
             phase = .idle
+            updater = nil   // a Cancel stays with its updater, so the next job starts with a new one
         }
     }
 
@@ -652,6 +653,7 @@ final class DeviceController {
                 s.firmwareId = f.id
                 s.firmwareName = f.name
                 s.version = f.versionSaid(in: reportedName)
+                s.packageExact = !ambiguous
             } else if from == "phone" || from == "GitHub release", !pkg.isOfficial, who?.exact != true || pkg.sha256 != who?.firmware?.sha256 {
                 // found by its identity alone, on the phone or among the makers' releases: nothing ties it to this FM-1
                 s.packageExact = false

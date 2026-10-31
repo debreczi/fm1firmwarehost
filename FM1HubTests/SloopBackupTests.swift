@@ -176,6 +176,9 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA v1.8.0"), "Felucca 1.8.0", "Felucca itself: felucca.c defines v1.8.0")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA 0.8"), "Felucca 0.8")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA video"), "video")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA sloopDX 4.0 BETA"), "sloopDX 4.0", "a release build of a fork")
+        XCTAssertEqual(EditorInfo.ownName(of: "X0X 1.1.0 BETA"), "X0X 1.1.0")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA 2.4 BETA"), "Felucca 2.4")
         XCTAssertEqual(EditorInfo.ownName(of: "DRUM-DEV"), "DRUM-DEV")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA "), "FELUCCA ")
     }
