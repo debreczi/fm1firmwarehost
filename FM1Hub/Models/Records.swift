@@ -114,6 +114,7 @@ struct Snapshot: Codable, Identifiable, Hashable {
     var packageConfirmed: Bool? = nil   // the device itself named the firmware of this package
     var packageNote: String? = nil      // why there is no package, while there is none
     var archiveFirmware: String? = nil  // what the firmware said when a SLOOP archive was made, "FELUCCA SLOOP 2.8.4"
+    var ownInstaller: String? = nil     // the page that installs this package's firmware, when the package alone can't
 
     var hasPackage: Bool { packageFile != nil }
     var hasArchive: Bool { archiveFile != nil }

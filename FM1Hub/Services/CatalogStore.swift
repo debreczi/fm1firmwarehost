@@ -91,7 +91,7 @@ final class CatalogStore {
 
     /// What to call a backup's firmware in a sentence: not "one of 23 firmwares that report FM-1_900".
     func firmwareName(of s: Snapshot) -> String {
-        s.firmwareId == nil && identityIsAmbiguous(s.identity) ? "this backup's firmware" : s.firmwareName
+        s.firmwareId == nil && identityIsAmbiguous(s.identity) ? "the firmware of backup “\(s.name)”" : s.firmwareName
     }
 
     /// A backup whose package nothing ties to the firmware that was on the device.

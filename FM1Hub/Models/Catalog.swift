@@ -123,8 +123,9 @@ struct Firmware: Codable, Identifiable, Hashable {
     static func named(_ reported: String?, among all: [Firmware]) -> Firmware? {
         guard let said = reported.map({ EditorInfo.plain($0).trimmingCharacters(in: .whitespaces).lowercased() }), !said.isEmpty else { return nil }
         let hits = all.filter {
-            let full = EditorInfo.plain("\($0.name) \($0.version)").lowercased()
-            return full == said || full.hasPrefix(said + "-")
+            if EditorInfo.plain("\($0.name) \($0.version)").lowercased() == said { return true }
+            guard let version = $0.versionSaid(in: said) else { return false }
+            return EditorInfo.plain($0.version).lowercased().hasPrefix(version + "-")
         }
         return hits.count == 1 ? hits[0] : nil
     }

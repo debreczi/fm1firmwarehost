@@ -207,6 +207,12 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertEqual(w?.exact, true)
         XCTAssertEqual(c.whoIs("FM-1_900", named: "MYCELIUM 1.0-other")?.exact, false)
         XCTAssertEqual(c.whoIs("FM-1_900", named: "MYCELIUM 1")?.exact, false, "1 is not 1.0")
+
+        // a dash in the firmware's name is another matter
+        let dashed = catalog(extra: [Self.entry("mc1", "MC-1", "1.2.0", "FM-1_900"), Self.entry("minitone", "Mini-Tone", "1.0.5", "FM-1_900")])
+        XCTAssertNil(dashed.whoIs("FM-1_900", named: "MC")?.firmware, "a fork saying only MC is not the hub's MC-1")
+        XCTAssertNil(dashed.whoIs("FM-1_900", named: "Mini")?.firmware)
+        XCTAssertEqual(dashed.whoIs("FM-1_900", named: "MC-1 1.2.0")?.exact, true)
     }
 
     func testAFirmwareWhoseNameWasCutIsTheOwnerOfItsNumberAsOnMain() {
@@ -276,6 +282,18 @@ final class SharedIdentityTests: XCTestCase {
             device.seedDemo()
             XCTAssertTrue(device.isRunning(try XCTUnwrap(c.firmware(id: "felucca"))), "an identity of its own can")
             XCTAssertFalse(device.isRunning(try XCTUnwrap(c.firmware(id: "golana"))))
+        }
+    }
+
+    func testABackupRemembersThatItsPackageNeedsItsOwnInstaller() throws {
+        let data = FWSCPackageTests.makePackage(product: "FM-1_46001200", payload: 1024)
+        let sha = try FWSCPackage(data: data).sha256
+        let c = catalog(extra: [Self.entry("fizz", "FIZZ", "1.0", "FM-1_46001200", sha: sha, install: "https://example.com/install")])
+        try withController(c) { device, library in
+            let s = aBackup(identity: "FM-1_46001200", name: "FIZZ")
+            library.add(s)
+            try attach(data, to: s, device: device)
+            XCTAssertEqual(library.snapshots.first?.ownInstaller, "https://example.com/install", "whatever becomes of the catalogue")
         }
     }
 
@@ -383,7 +401,7 @@ final class SharedIdentityTests: XCTestCase {
 
     func testAFirmwaresNameInASentence() {
         let c = catalog()
-        XCTAssertEqual(c.firmwareName(of: aBackup(identity: "FM-1_900")), "this backup's firmware")
+        XCTAssertEqual(c.firmwareName(of: aBackup(identity: "FM-1_900")), "the firmware of backup “A backup”", "it also goes into History and the Resume card")
         var named = aBackup(identity: "FM-1_900", name: "SLOOP")
         named.firmwareId = "sloop"
         XCTAssertEqual(c.firmwareName(of: named), "SLOOP")

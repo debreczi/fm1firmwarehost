@@ -744,7 +744,13 @@ final class DeviceController {
         s.product = pkg.product
         s.packageExact = pkg.product == s.identity && (confirmed || (!ambiguous && !saidOtherVersion))
         s.packageConfirmed = confirmed ? true : nil
-        if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
+        s.ownInstaller = nil
+        if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) {
+            s.version = f.version
+            s.firmwareId = f.id
+            s.firmwareName = f.name
+            if f.needsOwnInstaller { s.ownInstaller = f.install }
+        }
         else if !ambiguous, let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
         else if ambiguous {
             s.version = nil
@@ -801,7 +807,8 @@ final class DeviceController {
             let pkg = try FWSCPackage(data: try Data(contentsOf: url))
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
             let fw = s.firmwareId.flatMap { catalog.firmware(id: $0) }
-            if let f = fw, f.needsOwnInstaller { throw FM1Error.package("\(f.name) is installed by its maker's own page: the package alone is not all of it.") }
+            // the backup's own record first: the hub may have dropped the firmware, or the catalogue may be gone
+            if s.ownInstaller != nil || fw?.needsOwnInstaller == true { throw FM1Error.package("\(s.firmwareName) is installed by its maker's own page: the package alone is not all of it.") }
             try await autoSnapshotIfWanted()
             let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true,
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)

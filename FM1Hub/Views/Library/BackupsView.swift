@@ -102,8 +102,10 @@ struct SnapshotDetailView: View {
     /// The firmwares this backup's identity may belong to.
     private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
     private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
-    /// The firmware of this backup, when its package alone can't put it back.
-    private var ownInstaller: Firmware? { snapshot.firmwareId.flatMap { catalog.firmware(id: $0) }.flatMap { $0.needsOwnInstaller ? $0 : nil } }
+    /// The page that puts this backup's firmware back, when its package alone can't.
+    private var ownInstaller: String? {
+        snapshot.ownInstaller ?? snapshot.firmwareId.flatMap { catalog.firmware(id: $0) }.flatMap { $0.needsOwnInstaller ? $0.install : nil }
+    }
 
     private var musicFacts: String {
         guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
@@ -126,11 +128,11 @@ struct SnapshotDetailView: View {
                 }
 
                 VStack(spacing: 10) {
-                    if let f = ownInstaller {
-                        if let u = f.install.flatMap(URL.init) {
+                    if let page = ownInstaller {
+                        if let u = URL(string: page) {
                             Link(destination: u) { Label("Install with its own installer", systemImage: "arrow.up.right.square") }.buttonStyle(SecondaryButtonStyle())
                         }
-                        Text("\(f.name) is installed by its maker's own page: the package alone is not all of it.").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
+                        Text("\(snapshot.firmwareName) is installed by its maker's own page: the package alone is not all of it.").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
                     } else if snapshot.hasPackage {
                         Button { confirmRestore = true } label: { Label("Restore the firmware", systemImage: "arrow.counterclockwise") }
                             .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)

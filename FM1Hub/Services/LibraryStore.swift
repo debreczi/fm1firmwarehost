@@ -263,6 +263,8 @@ final class LibraryStore {
 
     /// Names recovered backups after the catalogue is loaded ("Skiff" instead of "FM-1_720" where the hub knows it).
     func nameRecovered(using catalog: CatalogStore) {
+        // without a catalogue every name would come out as "another firmware", and stay so
+        guard !catalog.firmwares.isEmpty else { return }
         var changed = false
         for i in snapshots.indices where snapshots[i].firmwareName == snapshots[i].identity && snapshots[i].identity.hasPrefix("FM-1_") {
             if let w = catalog.whoIs(snapshots[i].identity) {

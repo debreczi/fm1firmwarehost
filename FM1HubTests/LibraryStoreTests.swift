@@ -141,6 +141,27 @@ final class LibraryStoreTests: XCTestCase {
         }
     }
 
+    func testNamesWaitForTheCatalogue() {
+        withCleanLibrary {
+            let store = LibraryStore(folder: folder)
+            var s = aSnapshot
+            s.firmwareId = nil
+            s.firmwareName = "FM-1_924"
+            s.identity = "FM-1_924"
+            store.add(s)
+
+            let catalog = CatalogStore()
+            XCTAssertTrue(catalog.apply(Data(#"{"firmwares":[]}"#.utf8)))
+            store.nameRecovered(using: catalog)
+            XCTAssertEqual(store.snapshots.first?.firmwareName, "FM-1_924", "not \"another firmware\" for good")
+
+            let floyd = #"{"id":"floyd","name":"SLOOP Floyd FM","version":"2.4","pkg":"fw/floyd.fwsc","product":"FM-1_924","size":1,"sha256":""}"#
+            XCTAssertTrue(catalog.apply(Data(#"{"firmwares":[\#(floyd)]}"#.utf8)))
+            store.nameRecovered(using: catalog)
+            XCTAssertEqual(store.snapshots.first?.firmwareName, "SLOOP Floyd FM")
+        }
+    }
+
     func testAPackageBesideASloopArchiveIsNotTakenForExact() throws {
         try withCleanLibrary {
             let dir = folder.appendingPathComponent("Snapshots/\(UUID().uuidString)", isDirectory: true)
