@@ -4,7 +4,11 @@
 //
 // Complete musical archives of SLOOP and the firmwares built on it: the working project, the settings, the song
 // sections, the user presets, the FM6 bank, the SYN kits, the MIDI map, the theme and the sample slots. The file is the
-// editor's own ("sloop-backup" v1), so an archive made here opens in the SLOOP web editor.
+// editor's own ("sloop-backup" v1), so an archive made here opens in the web editor of the firmware it came from.
+//
+// Every firmware of the family is backed up the same way, because each lists what it holds. Writing back is another
+// matter: those built on SLOOP keep objects of their own, in orders and formats only their own editors know, so the app
+// writes back SLOOP's archives to SLOOP and leaves the others to their editors.
 
 import Foundation
 
@@ -36,12 +40,16 @@ struct EditorInfo: Equatable {
     let paramCount: Int
     let protocolVersion: Int    // 0 on firmware older than protocol v5
 
-    /// The firmware's own name: "SLOOP 2.8.4". This protocol's firmwares send it after Felucca's, which stays when a
-    /// version follows it: "FELUCCA 1.8.0".
+    /// The firmware's own name: "SLOOP 2.8.4". This protocol's firmwares send it after Felucca's. Felucca itself sends
+    /// only its version there ("FELUCCA v1.8.0"), which makes it "Felucca 1.8.0".
     static func ownName(of version: String) -> String {
         let prefix = "FELUCCA "
-        guard version.hasPrefix(prefix), let next = version.dropFirst(prefix.count).first, !next.isNumber else { return version }
-        return String(version.dropFirst(prefix.count))
+        guard version.hasPrefix(prefix) else { return version }
+        let rest = version.dropFirst(prefix.count)
+        guard let first = rest.first else { return version }
+        if first.isNumber { return "Felucca \(rest)" }
+        if first == "v", rest.dropFirst().first?.isNumber == true { return "Felucca \(rest.dropFirst())" }
+        return String(rest)
     }
     var name: String { EditorInfo.ownName(of: version) }
 
@@ -75,18 +83,13 @@ enum SloopBackup {
     }
     static let chunk = 256
     static let sampleDataOffset = 512, sampleHeaderLength = 480
-    /// The order they are written back: banks, song sections, the working project, then the settings. Objects only a
-    /// firmware built on SLOOP has (Clipper's 12-14) go with the banks.
-    static let banks = [6, 7, 8, 9, 10, 11], projects = [2, 3, 4, 5, 0, 1]
+    /// The order they are written back: banks, song sections, the working project, then the settings.
+    static let restoreOrder = [6, 7, 8, 9, 10, 11, 2, 3, 4, 5, 0, 1]
     static let sampleIds = [32, 33, 34, 35]
-    /// Every object but these may be missing from a firmware older than the file, or from another of the family: it
-    /// answers their begin with 1 or 5, and they are skipped.
-    static let requiredIds: Set<Int> = [0, 1, 2, 3, 4, 5, 6, 7]
-
-    static func restoreOrder(of ids: some Sequence<Int>) -> [Int] {
-        let known = Set(banks + projects + sampleIds)
-        return banks + ids.filter { !known.contains($0) }.sorted() + projects
-    }
+    /// Objects a firmware older than the file may not have: it answers their begin with 1 or 5, and they are skipped.
+    static let optionalIds: Set<Int> = [8, 9, 10, 11]
+    /// What the app says of an archive it leaves to the firmware's own editor.
+    static let ownEditorOnly = "This music goes back through the web editor of the firmware it came from. Share the files from this backup and open the sloop-backup file there."
     /// Far above any object an FM-1 can hold: a manifest may not make the phone allocate more than this for one.
     static let maxObjectSize = 1 << 20
 
@@ -188,7 +191,8 @@ enum SloopBackup {
         guard file.format == SloopArchive.formatName, file.version == 1 else { throw FM1Error.package("Not a SLOOP backup.") }
         var all: [Int: [UInt8]] = [:]
         for o in file.objects {
-            guard (0...127).contains(o.id), all[o.id] == nil, o.len >= 0, o.len <= maxObjectSize, let bytes = o.bytes else {
+            guard restoreOrder.contains(o.id) || sampleIds.contains(o.id) else { throw FM1Error.package(ownEditorOnly) }
+            guard all[o.id] == nil, o.len >= 0, o.len <= maxObjectSize, let bytes = o.bytes else {
                 throw FM1Error.package("Invalid backup object.")
             }
             guard bytes.count == o.len, SevenBit.crc32(bytes) == o.crc else { throw FM1Error.package("Backup checksum mismatch.") }
@@ -219,26 +223,44 @@ enum SloopBackup {
         return Int(d[0]) - 0x30
     }
 
-    /// "SLOOP 2.6" against a version: true when it is at least that.
-    static func firmware(_ text: String, isAtLeast want: [Int]) -> Bool {
+    /// The first version number in a firmware's words: [2, 8, 4] for "SLOOP 2.8.4".
+    static func versionNumbers(_ text: String) -> [Int]? {
         guard let re = try? NSRegularExpression(pattern: #"(\d+)\.(\d+)(?:\.(\d+))?"#),
-              let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return false }
-        let have = (1...3).map { i -> Int in
+              let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+        return (1...3).map { i -> Int in
             guard let r = Range(m.range(at: i), in: text) else { return 0 }
             return Int(text[r]) ?? 0
         }
+    }
+
+    /// "SLOOP 2.6" against a version: true when it is at least that.
+    static func firmware(_ text: String, isAtLeast want: [Int]) -> Bool {
+        guard let have = versionNumbers(text) else { return false }
         for i in 0..<3 where have[i] != want[i] { return have[i] > want[i] }
         return true
+    }
+
+    /// BK_PUT's rc. 5 is the object's begin gone stale here, not the snapshot it is while reading.
+    private static func checkPut(_ rc: UInt8) throws {
+        if rc == 5 { throw FM1Error.protocolError("The FM-1 lost its place in the restore.") }
+        try FeluccaBackup.check(rc)
     }
 
     /// Writes an archive back: the objects in `restoreOrder`, each committed on its own, then the samples.
     static func restore(_ fl: some EditorLink, _ file: SloopArchive, info: EditorInfo, onProgress: @escaping (Int, Int) -> Void) async throws {
         var bytesOf = try validate(file)
-        guard info.hasBackup else { throw FM1Error.package("\(info.version) has no backup over USB.") }
-        // projects newer than the device reads: stop before anything is written, not at the first project
-        let newest = [0, 2, 3, 4, 5].compactMap { bytesOf[$0] }.map(projectFormat).max() ?? 0
-        if newest > info.newestProjectFormat {
-            throw FM1Error.package("This backup was made on \(file.firmware), newer than the \(info.version) on the FM-1. Restore the firmware first.")
+        let madeOn = EditorInfo.ownName(of: file.firmware)
+        guard madeOn.hasPrefix("SLOOP ") else { throw FM1Error.package(ownEditorOnly) }
+        guard info.hasBackup, info.name.hasPrefix("SLOOP ") else {
+            throw FM1Error.package("This music was made on \(madeOn), and the FM-1 runs \(info.name). Restore the firmware first.")
+        }
+        // Back onto an older SLOOP: stop before anything is written if it can't read the projects, not at the first one.
+        // On the same or a newer SLOOP it can, and this table may not know a format that came after it.
+        if !firmware(info.version, isAtLeast: versionNumbers(file.firmware) ?? [0, 0, 0]) {
+            let newest = [0, 2, 3, 4, 5].compactMap { bytesOf[$0] }.map(projectFormat).max() ?? 0
+            if newest > info.newestProjectFormat {
+                throw FM1Error.package("This backup was made on \(madeOn), newer than the \(info.name) on the FM-1. Restore the firmware first.")
+            }
         }
         // A backup without object 10 had the MIDI settings at their defaults: restored as such, not left as they are now
         if bytesOf[10] == nil, firmware(file.firmware, isAtLeast: [2, 5, 1]) {
@@ -253,26 +275,26 @@ enum SloopBackup {
                                          accepts: { $0.count >= 3 && $0[0] == op && $0[1] == id })
             return a[2]
         }
-        for objectId in restoreOrder(of: bytesOf.keys) {
+        for objectId in restoreOrder {
             guard let d = bytesOf[objectId] else { continue }
             let id = UInt8(objectId)
             let begun = try await put(Op.begin, id, SevenBit.u32(UInt32(d.count)) + SevenBit.u32(SevenBit.crc32(d)), timeout: 1.5, retries: 1)
-            if !requiredIds.contains(objectId), begun == 1 || begun == 5 {
+            if optionalIds.contains(objectId), begun == 1 || begun == 5 {
                 done += d.count
                 onProgress(done, total)
                 continue
             }
-            try FeluccaBackup.check(begun)
+            try checkPut(begun)
             do {
                 var off = 0
                 while off < d.count {
                     let end = min(off + chunk, d.count)
-                    try FeluccaBackup.check(try await put(Op.data, id, SevenBit.u32(UInt32(off)) + SevenBit.blockPack(d[off..<end]), timeout: 1.5, retries: 1))
+                    try checkPut(try await put(Op.data, id, SevenBit.u32(UInt32(off)) + SevenBit.blockPack(d[off..<end]), timeout: 1.5, retries: 1))
                     done += end - off
                     onProgress(done, total)
                     off = end
                 }
-                try FeluccaBackup.check(try await put(Op.commit, id, timeout: 5.0, retries: 0))
+                try checkPut(try await put(Op.commit, id, timeout: 5.0, retries: 0))
             } catch {
                 _ = try? await put(Op.abort, id, timeout: 1.5, retries: 0)
                 throw error

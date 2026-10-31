@@ -5,6 +5,14 @@ import XCTest
 /// rebuilt between two attempts keeps its identity and changes its hash. These tests pin that lookup down.
 final class PackageStoreTests: XCTestCase {
 
+    func testACustomFirmwareOnAnOldOfficialNumberIsNotTheLatestOfficial() throws {
+        let store = PackageStore.shared
+        let custom = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_007", payload: 1024))
+        let u = try store.keep(custom)
+        defer { try? FileManager.default.removeItem(at: u) }
+        XCTAssertNotEqual(store.newestCachedOfficial()?.product, "FM-1_007", "hawk-chua uses that number")
+    }
+
     func testLocalPackageMatchesTheExactBuildWhenAHashIsGiven() throws {
         let store = PackageStore.shared
         let a = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_904", payload: 1024))

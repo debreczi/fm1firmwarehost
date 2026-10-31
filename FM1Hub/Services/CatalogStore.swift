@@ -77,23 +77,27 @@ final class CatalogStore {
         }
     }
 
-    /// Can't this identity alone say which firmware runs? Never trust it then: without the catalogue nothing is known,
-    /// and an official-looking number can be a custom firmware's.
+    /// Can't this identity alone name a firmware? Then nothing may be taken for it: several firmwares have it, or none
+    /// does and several ranges cover it; without the catalogue nothing is known; and an official-looking number can be a
+    /// custom firmware's. One firmware that has it, with other ranges covering it, still names that one, as the hub says
+    /// (FM-1_714 is Matryoshka), but no backup can be sure of it: see `packageIsUnconfirmed`.
     func identityIsAmbiguous(_ identity: String) -> Bool {
         let may = firmwares(reporting: identity)
         if FWSCPackage.isOfficialProduct(identity) { return !may.isEmpty }
-        return firmwares.isEmpty || may.count > 1
+        if firmwares.isEmpty { return true }
+        let owners = may.filter { $0.product == identity }
+        return owners.count > 1 || (owners.isEmpty && may.count > 1)
     }
 
     /// A backup whose package nothing ties to the firmware that was on the device.
     func packageIsUnconfirmed(in s: Snapshot) -> Bool {
         guard s.hasPackage, s.packageConfirmed != true else { return false }
-        return identityIsAmbiguous(s.identity) || (!s.packageExact && s.version == nil)
+        return identityIsAmbiguous(s.identity) || firmwares(reporting: s.identity).count > 1 || (!s.packageExact && s.version == nil)
     }
 
     /// The firmware behind an identity string, as the hub's whoIs(): an exact product match names one, a family
-    /// range (the "ident" pattern) names one when only one matches. When the identity is ambiguous, what the device says
-    /// of itself (`reported`) can name one.
+    /// range (the "ident" pattern) names one when only one matches. What the device says of itself (`reported`) can name
+    /// one among those the identity may be, and can name one whose package has another identity: another version of it.
     func whoIs(_ text: String?, named reported: String? = nil) -> WhoIs? {
         guard let text = text, !text.isEmpty else { return nil }
         let may = firmwares(reporting: text)
@@ -101,11 +105,13 @@ final class CatalogStore {
         if let v = official, may.isEmpty { return WhoIs(firmware: nil, exact: true, name: "the official firmware (\(v))") }
         if text == "FM-1_000" { return WhoIs(firmware: nil, exact: true, name: "the USB rescue mode (FM-1_000)") }
         if text.lowercased().hasPrefix("ota-") { return WhoIs(firmware: nil, exact: true, name: "the update loader (\(text))") }
-        if let f = Firmware.named(reported, among: may), f.product == text { return WhoIs(firmware: f, exact: true, name: f.name) }
+        if let f = Firmware.named(reported, among: may) { return WhoIs(firmware: f, exact: f.product == text, name: f.name) }
         if let v = official { return WhoIs(firmware: nil, exact: false, name: (may.map(\.name) + ["the official firmware (\(v))"]).joined(separator: " or ")) }
-        if may.count == 1, may[0].product == text { return WhoIs(firmware: may[0], exact: true, name: may[0].name) }
-        if may.count == 2 { return WhoIs(firmware: nil, exact: false, name: may.map(\.name).joined(separator: " or ")) }
-        if may.count > 2 { return WhoIs(firmware: nil, exact: false, name: "one of \(may.count) firmwares that report \(text)") }
+        let owners = may.filter { $0.product == text }
+        if owners.count == 1 { return WhoIs(firmware: owners[0], exact: true, name: owners[0].name) }
+        let list = owners.isEmpty ? may : owners
+        if list.count == 2 { return WhoIs(firmware: nil, exact: false, name: list.map(\.name).joined(separator: " or ")) }
+        if list.count > 2 { return WhoIs(firmware: nil, exact: false, name: "one of \(list.count) firmwares that report \(text)") }
         var fam = firmwares.filter { f in
             guard let ident = f.ident, let re = try? NSRegularExpression(pattern: "^(?:" + ident + ")$") else { return false }
             return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil

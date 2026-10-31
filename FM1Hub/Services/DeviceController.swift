@@ -327,6 +327,7 @@ final class DeviceController {
         start(job: j) { [self] in
             phase = .downloading(0)
             let pkg = try await pendingPackage(pending, firmware: f)
+            if Task.isCancelled { throw FM1Error.cancelled }   // the updater made here knows nothing of an earlier Cancel
             let up = makeUpdater()
             // The record already exists; this writes back the loader identity this attempt found, so that if the
             // record was made without knowing what the device was running, a later Connect can still settle it.
@@ -378,7 +379,9 @@ final class DeviceController {
         // Cancel reaches the updater of the moment, and the updater made here starts afresh: one pressed before now, or
         // while the loader is asked for below, is only remembered by the task.
         if Task.isCancelled { throw FM1Error.cancelled }
-        reportedName = nil       // whatever this leaves on the FM-1, it is no longer known to be what spoke before
+        // whatever this leaves on the FM-1, it is no longer known to be what answered before
+        reportedName = nil
+        musicBackupSupported = nil
         let up = makeUpdater()
         let image = pkg.logicalImage
         try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
@@ -396,7 +399,9 @@ final class DeviceController {
         }
         let after: String
         do {
-            if let ota = await up.loaderPresent() {
+            let waiting = await up.loaderPresent()
+            if Task.isCancelled { throw FM1Error.cancelled }
+            if let ota = waiting {
                 append("loader waiting: \(ota.text), resuming")
                 switch try await up.resume(image: image, expectedProduct: product, stockLoader: stockLoader,
                                            beforeWriting: record,
@@ -410,7 +415,6 @@ final class DeviceController {
                     throw FM1Error.stopped("The loader stopped before the end. Replug and press Install again.")
                 }
             } else {
-                if Task.isCancelled { throw FM1Error.cancelled }
                 after = try await up.install(image: image, product: product, beforeWriting: record,
                                              onStep: { s in Task { @MainActor in self.phase = .installing(s) } })
             }
@@ -512,18 +516,22 @@ final class DeviceController {
         } catch {
             append("auto backup failed: \(error.localizedDescription)")
             dev.link.close()
+            if let e = error as? FM1Error, case .cancelled = e { throw e }
             throw FM1Error.backup("The backup before the install failed (\(error.localizedDescription)). Nothing was written. Stop playback on the FM-1 and try again, or turn the automatic backup off in Settings.")
         }
         dev.link.close()
     }
 
-    /// Which music backup the firmware answers. One that answered at Connect and now says nothing has lost a reply, not
-    /// its backup: that is asked again and, failing that, an error rather than a backup without the music.
+    /// Which music backup the firmware answers. A firmware that speaks at all and answers none may have lost a reply, so
+    /// it is asked again. One that answered since it was connected and no longer does is an error, not a backup without
+    /// the music.
     private func detectMusic(_ fl: FeluccaLink) async throws -> (info: EditorInfo?, kind: MusicBackupKind?) {
         let music = await SloopBackup.detect(fl)
-        guard music.kind == nil, musicBackupSupported == true else { return music }
+        guard music.kind == nil, music.info != nil || musicBackupSupported == true else { return music }
         let again = await SloopBackup.detect(fl)
-        if again.kind == nil { throw FM1Error.stopped("The FM-1 answered the music backup earlier, but not now.") }
+        if again.kind == nil, musicBackupSupported == true {
+            throw FM1Error.backup("The FM-1 answered the music backup when it was connected, but not now. If its firmware has changed since, press Ask again on the Device tab.")
+        }
         return again
     }
 
@@ -593,6 +601,7 @@ final class DeviceController {
         reportedName = music.info?.name
         let who = catalog.whoIs(dev.identity.text, named: reportedName)
         let ambiguous = catalog.identityIsAmbiguous(dev.identity.text)
+        let named = Firmware.named(reportedName, among: catalog.firmwares(reporting: dev.identity.text))?.product == dev.identity.text
         var s = Snapshot(name: name ?? prefix + whoIsName(dev.identity), identity: dev.identity.text, firmwareId: who?.firmware?.id,
                          firmwareName: who?.firmware?.name ?? who?.name ?? dev.identity.text,
                          version: who?.exact == true ? who?.firmware?.version : nil, product: nil, packageFile: nil,
@@ -627,22 +636,25 @@ final class DeviceController {
             musicBackupSupported = false
         }
         // the package: wherever it is
-        if let found = await findPackage(for: dev.identity.text, who: who, ambiguous: ambiguous) {
-            let (pkg, from) = found
-            // with an ambiguous identity the only package findPackage returns is the one the device itself named
-            try storePackage(pkg, in: &s, confirmed: ambiguous && who?.exact == true)
-            // found by its identity alone, in the releases of whichever maker has that number: nothing ties it to this FM-1
-            if from == "GitHub release", who?.firmware == nil { s.packageExact = false }
+        let found = await findPackage(for: dev.identity.text, who: who, ambiguous: ambiguous)
+        if Task.isCancelled { throw FM1Error.cancelled }   // not "no package found", which is what a cancelled search looks like
+        if let (pkg, from) = found {
+            try storePackage(pkg, in: &s, confirmed: named && from == "hub")
+            // found by its identity alone, on the phone or among the makers' releases: nothing ties it to this FM-1
+            if from == "phone" || from == "GitHub release", pkg.sha256 != who?.firmware?.sha256 {
+                s.packageExact = false
+                if !catalog.firmwares.contains(where: { $0.sha256 == pkg.sha256 }) { s.version = nil }
+            }
             append("package for \(dev.identity.text): \(from)")
         } else if catalog.firmwares.isEmpty {
-            s.notes = "The hub's catalogue could not be loaded, so the app can't tell which firmware this is. Open this backup again when the phone is online."
+            s.packageNote = "The hub's catalogue could not be loaded, so the app can't tell which firmware this is. Open this backup again when the phone is online."
             append("no catalogue: no package for \(dev.identity.text)")
         } else if ambiguous {
-            s.notes = who?.firmware.map { "\($0.name) \($0.version) could not be loaded from the hub. Choose it below when the phone is online." }
+            s.packageNote = who?.firmware.map { "\($0.name) \($0.version) could not be loaded from the hub. Choose it below when the phone is online." }
                 ?? "Several firmwares can report \(dev.identity.text), and this one did not say which it is. Choose yours and this backup becomes restorable."
             append("\(dev.identity.text) is ambiguous: no package chosen")
         } else {
-            s.notes = "No package found for \(dev.identity.text): not on the hub, not on this phone, not among the makers' GitHub releases. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
+            s.packageNote = "No package found for \(dev.identity.text): not on the hub, not on this phone, not among the makers' GitHub releases. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
             append("no package found for \(dev.identity.text)")
         }
         return s
@@ -681,27 +693,27 @@ final class DeviceController {
         Paths.ensure(folder)
         try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
         let ambiguous = catalog.identityIsAmbiguous(s.identity) || catalog.identityIsAmbiguous(pkg.product)
-        let hadPackage = s.hasPackage
         s.packageFile = "package.fwsc"
         s.packageSHA256 = pkg.sha256
         s.packageSize = pkg.bytes.count
         s.product = pkg.product
         s.packageExact = pkg.product == s.identity && (!ambiguous || confirmed)
         s.packageConfirmed = confirmed ? true : nil
-        if let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
-        else if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
+        if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
+        else if !ambiguous, let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
         else if ambiguous {
             s.version = nil
             s.firmwareId = nil
             if s.identity.hasPrefix("FM-1_") { s.firmwareName = catalog.whoIs(s.identity)?.name ?? s.identity }
         }
         else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
-        if !hadPackage { s.notes = "" }   // the app's own word on why there was none; after that the notes are the user's
+        s.packageNote = nil
+        if s.notes.hasPrefix("No package found for ") { s.notes = "" }   // where older versions left that word
     }
 
     /// A backup whose identity can't name its firmware, completed with the one the user says it is, from the hub.
     func attachFirmware(_ f: Firmware, to snapshot: Snapshot) {
-        guard !isBusy, catalog.firmwares(reporting: snapshot.identity).contains(f) else { return }
+        guard !isBusy, !f.needsOwnInstaller, catalog.firmwares(reporting: snapshot.identity).contains(f) else { return }
         var j = DeviceJob(kind: .snapshot, title: snapshot.name, subtitle: "\(f.name) \(f.version)", colour: Look.colour(for: f.id), imageURL: f.imageURL)
         start(job: j) { [self] in
             phase = .searching("The hub has \(f.name) \(f.version).")
@@ -740,8 +752,9 @@ final class DeviceController {
             let before = identity?.text
             let pkg = try FWSCPackage(data: try Data(contentsOf: url))
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
-            try await autoSnapshotIfWanted()
             let fw = s.firmwareId.flatMap { catalog.firmware(id: $0) }
+            if let f = fw, f.needsOwnInstaller { throw FM1Error.package("\(f.name) is installed by its maker's own page: the package alone is not all of it.") }
+            try await autoSnapshotIfWanted()
             let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true,
                                         name: s.firmwareName, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: s.firmwareName, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,

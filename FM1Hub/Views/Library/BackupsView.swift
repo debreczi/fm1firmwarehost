@@ -106,7 +106,7 @@ struct SnapshotDetailView: View {
     private var musicFacts: String {
         guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
         let size = ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file)
-        let format = snapshot.hasSloopArchive ? "sloop-backup v1, opens in the SLOOP web editor too" : "felucca-backup v1, opens in the Felucca web editor too"
+        let format = snapshot.hasSloopArchive ? "sloop-backup v1, opens in the web editor of the firmware it came from" : "felucca-backup v1, opens in the Felucca web editor too"
         return "\(snapshot.archiveObjects ?? 0) objects, \(size) (\(format))"
     }
 
@@ -135,7 +135,7 @@ struct SnapshotDetailView: View {
                                     .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
                             }
                         } else if !snapshot.packageExact {
-                            Text("The FM-1 ran another version of \(snapshot.firmwareName) than the hub had (\(snapshot.identity)); the package saved is the hub's \(snapshot.version ?? "").")
+                            Text("The FM-1 reported \(snapshot.identity), and the package saved is the hub's \(snapshot.firmwareName) \(snapshot.version ?? ""), which reports something else. It may not be what was on your FM-1.")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
                         }
                     } else {
@@ -146,8 +146,12 @@ struct SnapshotDetailView: View {
                         AttachPackageView(snapshot: $snapshot)
                     }
                     if snapshot.hasArchive {
-                        Button { confirmArchive = true } label: { Label("Restore the music archive", systemImage: "music.note") }
-                            .buttonStyle(SecondaryButtonStyle(tint: Theme.ok)).disabled(device.isBusy)
+                        if snapshot.musicRestoresInApp {
+                            Button { confirmArchive = true } label: { Label("Restore the music archive", systemImage: "music.note") }
+                                .buttonStyle(SecondaryButtonStyle(tint: Theme.ok)).disabled(device.isBusy)
+                        } else {
+                            Text(SloopBackup.ownEditorOnly).font(.system(size: 12)).foregroundStyle(Theme.textDim)
+                        }
                     }
                     if let u = library.packageURL(for: snapshot) ?? library.archiveURL(for: snapshot) {
                         ShareLink(items: [library.packageURL(for: snapshot), library.archiveURL(for: snapshot)].compactMap { $0 }) {
@@ -237,7 +241,7 @@ struct FirmwareChoiceView: View {
                 if let said = snapshot.reportedName {
                     Text("It called itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
                 }
-                ForEach(Firmware.likeliestFirst(firmwares, reported: snapshot.reportedName, lastInstalled: last)) { f in
+                ForEach(Firmware.likeliestFirst(firmwares.filter { !$0.needsOwnInstaller }, reported: snapshot.reportedName, lastInstalled: last)) { f in
                     Button { device.attachFirmware(f, to: snapshot); dismiss() } label: {
                         HStack(spacing: 12) {
                             HubImage(url: f.imageURL, tint: Look.colour(for: f.id)).frame(width: 56, height: 44).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -271,7 +275,7 @@ struct AttachPackageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("No firmware package in this backup", systemImage: "shippingbox").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
-            Text(snapshot.notes.isEmpty ? "The FM-1 reported \(snapshot.identity), and no package with that identity could be found on the hub, on this phone or among the makers' releases." : snapshot.notes)
+            Text(snapshot.packageNote ?? "The FM-1 reported \(snapshot.identity), and no package with that identity could be found on the hub, on this phone or among the makers' releases.")
                 .font(.system(size: 13)).foregroundStyle(Theme.textDim)
             Button { importing = true } label: { Label("Pick its .fwsc from Files", systemImage: "folder") }.buttonStyle(SecondaryButtonStyle())
             if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Theme.err) }

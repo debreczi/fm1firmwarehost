@@ -63,7 +63,8 @@ final class PackageStore {
     func newestCachedOfficial() -> FWSCPackage? {
         var best: FWSCPackage?
         for u in cachedFiles() where u.lastPathComponent.hasPrefix("FM-1_0") {
-            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial {
+            // below V15 such a number can be a custom firmware's: Bubba is FM-1_003
+            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial, p.product >= FWSCPackage.stockV15Product {
                 if best == nil || p.product > best!.product { best = p }
             }
         }

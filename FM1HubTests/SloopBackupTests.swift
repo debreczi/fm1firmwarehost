@@ -173,7 +173,9 @@ final class SloopBackupTests: XCTestCase {
     func testAFirmwaresOwnNameIsWhatFollowsFeluccas() {
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA SLOOP 2.8.4"), "SLOOP 2.8.4")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA CLIPPER 1.3"), "CLIPPER 1.3")
-        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA 1.8.0"), "FELUCCA 1.8.0", "Felucca itself")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA v1.8.0"), "Felucca 1.8.0", "Felucca itself: felucca.c defines v1.8.0")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA 0.8"), "Felucca 0.8")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA video"), "video")
         XCTAssertEqual(EditorInfo.ownName(of: "DRUM-DEV"), "DRUM-DEV")
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA "), "FELUCCA ")
     }
@@ -274,24 +276,65 @@ final class SloopBackupTests: XCTestCase {
                        "the samples come last, an empty slot is erased")
     }
 
-    func testObjectsOnlyAFirmwareOfTheFamilyHasAreKeptAndGoBackWithTheBanks() async throws {
-        let clipper = Self.aDevice()
-        clipper.objects[12] = Self.bytes(100, seed: 12)
-        clipper.objects[100] = Self.bytes(20, seed: 100)
-        let archive = try await capture(clipper)
-        XCTAssertEqual(archive.objects.first { $0.id == 12 }?.len, 100, "a backup does not fail on an object the app has not heard of")
+    func testABackupKeepsObjectsOnlyAFirmwareOfTheFamilyHas() async throws {
+        let fork = Self.aDevice()
+        fork.objects[12] = Self.bytes(100, seed: 12)
+        fork.objects[100] = Self.bytes(20, seed: 100)
+        let archive = try await capture(fork)
+        XCTAssertEqual(archive.objects.first { $0.id == 12 }?.bytes, fork.objects[12], "a backup does not fail on an object the app has not heard of")
+        XCTAssertEqual(archive.objects.first { $0.id == 100 }?.bytes, fork.objects[100])
+    }
 
-        let same = Self.aDevice()
-        try await restore(archive, to: same)
-        XCTAssertEqual(same.objects[12], clipper.objects[12])
-        XCTAssertEqual(same.objects[100], clipper.objects[100])
-        let commits = same.writes.filter { $0.hasPrefix("commit") }
-        XCTAssertEqual(commits, [6, 7, 8, 9, 10, 11, 12, 100, 2, 3, 4, 5, 0, 1].map { "commit \($0)" })
+    func testObjectsOnlyItsOwnEditorKnowsAreNeverWrittenBackByTheApp() async throws {
+        let fork = Self.aDevice()
+        fork.objects[14] = Self.bytes(100, seed: 14)   // Clipper's, whose editor writes it after the projects
+        let archive = try await capture(fork)
+        let device = Self.aDevice()
+        do {
+            try await restore(archive, to: device)
+            XCTFail("the app does not know where object 14 goes")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, SloopBackup.ownEditorOnly)
+            XCTAssertTrue(device.writes.isEmpty)
+        }
+    }
 
-        let other = Self.aDevice()
-        other.refused = [12, 100]
-        try await restore(archive, to: other)
-        XCTAssertTrue(other.writes.contains("commit 1"), "a firmware without them still gets the rest")
+    func testOnlySLOOPsMusicGoesBackToSLOOP() async throws {
+        let sloop = try await capture(Self.aDevice())
+        for other in ["FELUCCA CLIPPER 1.3", "FELUCCA sloopDX 4.0"] {
+            var file = sloop
+            file.firmware = other
+            let device = Self.aDevice()
+            do {
+                try await restore(file, to: device)
+                XCTFail("\(other)'s music goes back through its own editor")
+            } catch {
+                XCTAssertEqual(error.localizedDescription, SloopBackup.ownEditorOnly)
+                XCTAssertTrue(device.writes.isEmpty)
+            }
+            let onIt = Self.aDevice()
+            do {
+                try await restore(sloop, to: onIt, info: EditorInfo(version: other, paramCount: 126, protocolVersion: 11))
+                XCTFail("SLOOP's music does not go onto \(other)")
+            } catch {
+                XCTAssertTrue(onIt.writes.isEmpty)
+            }
+        }
+    }
+
+    func testAFirmwareOfAFormatTheTableHasNotHeardOfCanTakeItsOwnMusicBack() async throws {
+        let future = Self.aDevice()
+        future.objects[0] = Self.project(format: 7)
+        future.objects[2] = Self.project(format: 7, size: 300)
+        var file = try await capture(future)
+        file.firmware = "FELUCCA SLOOP 3.0"
+        let device = Self.aDevice()
+        try await restore(file, to: device, info: EditorInfo(version: "FELUCCA SLOOP 3.0", paramCount: 71, protocolVersion: 12))
+        XCTAssertEqual(device.objects[0], future.objects[0], "the same firmware reads what it wrote")
+
+        let later = Self.aDevice()
+        try await restore(file, to: later, info: EditorInfo(version: "FELUCCA SLOOP 3.1", paramCount: 71, protocolVersion: 12))
+        XCTAssertEqual(later.objects[0], future.objects[0], "and so does a newer one")
     }
 
     func testObjectsAnOlderFirmwareLacksAreSkipped() async throws {
@@ -348,6 +391,18 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertGreaterThan(late.ignored, 0, "the test did offer it replies to earlier requests")
     }
 
+    func testALostBeginIsNotCalledAFreshBackup() async throws {
+        let archive = try await capture(Self.aDevice())
+        let device = Self.aDevice()
+        device.refused = [6]
+        do {
+            try await restore(archive, to: device)
+            XCTFail("rc 5 on a preset bank is an error")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "The FM-1 lost its place in the restore.")
+        }
+    }
+
     func testASampleFailureSaysWhatItIs() async throws {
         let archive = try await capture(Self.aDevice())
         let failures: [(UInt8, UInt8, String)] = [
@@ -372,7 +427,7 @@ final class SloopBackupTests: XCTestCase {
         let archive = try await capture(Self.aDevice())
         let device = Self.aDevice()
         do {
-            try await restore(archive, to: device, info: EditorInfo(version: "SLOOP 2.5", paramCount: 61, protocolVersion: 10))
+            try await restore(archive, to: device, info: EditorInfo(version: "FELUCCA SLOOP 2.5", paramCount: 61, protocolVersion: 10))
             XCTFail("a format 6 project does not open in 2.5")
         } catch {
             XCTAssertTrue(device.writes.isEmpty)
@@ -384,7 +439,7 @@ final class SloopBackupTests: XCTestCase {
         let archive = try await capture(Self.aDevice())
         let device = Self.aDevice()
         do {
-            try await restore(archive, to: device, info: EditorInfo(version: "SLOOP 2.2", paramCount: 40, protocolVersion: 5))
+            try await restore(archive, to: device, info: EditorInfo(version: "FELUCCA SLOOP 2.2", paramCount: 40, protocolVersion: 5))
             XCTFail("no backup commands on protocol 5")
         } catch {
             XCTAssertTrue(device.writes.isEmpty)
@@ -400,7 +455,7 @@ final class SloopBackupTests: XCTestCase {
         defaults.replaceSubrange(32..<37, with: [1, 2, 3, 10, 2])
         XCTAssertEqual(device.objects[10], defaults, "BK_LIST leaves it out only while it is the default")
 
-        archive.firmware = "SLOOP 2.4"
+        archive.firmware = "FELUCCA SLOOP 2.4"
         let older = Self.aDevice()
         let before = older.objects[10]
         try await restore(archive, to: older)
@@ -437,7 +492,7 @@ final class SloopBackupTests: XCTestCase {
             a.objects[0] = SloopArchiveObject(id: o.id, len: o.len + 1, crc: o.crc, data: o.data)
         }
         try await refusesBeforeWriting { a in
-            a.objects.append(SloopArchiveObject(id: 200, len: 0, crc: 0, data: ""))
+            a.objects.append(SloopArchiveObject(id: 12, len: 0, crc: 0, data: ""))
         }
         try await refusesBeforeWriting { a in
             let short = [UInt8](repeating: 1, count: 100)
@@ -449,6 +504,9 @@ final class SloopBackupTests: XCTestCase {
     // MARK: Small helpers
 
     func testVersionsCompareAsTheEditorCompares() {
+        XCTAssertEqual(SloopBackup.versionNumbers("FELUCCA SLOOP 2.8.4"), [2, 8, 4])
+        XCTAssertEqual(SloopBackup.versionNumbers("SLOOP 2.8"), [2, 8, 0])
+        XCTAssertNil(SloopBackup.versionNumbers("DRUM-DEV"))
         XCTAssertTrue(SloopBackup.firmware("SLOOP 2.8.4", isAtLeast: [2, 5, 1]))
         XCTAssertTrue(SloopBackup.firmware("SLOOP 2.5.1", isAtLeast: [2, 5, 1]))
         XCTAssertFalse(SloopBackup.firmware("SLOOP 2.5", isAtLeast: [2, 5, 1]))
