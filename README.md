@@ -117,8 +117,9 @@ the app says so instead of pretending.
 
 Many firmwares report the same identity (`FM-1_900` has more than twenty), so the identity alone cannot say which one is
 running. The app asks the firmware's `INFO` and accepts only a name and version that match the hub's catalogue exactly.
-Otherwise it looks for no package and the user chooses the firmware, in the backup. The list of firmwares comes from the
-hub's catalogue, so a new firmware needs no app update.
+A name with another version than the hub's fetches that version from the firmware's own GitHub releases, when it is
+there. Otherwise it looks for no package and the user chooses the firmware, in the backup. The list of firmwares comes
+from the hub's catalogue, so a new firmware or version needs no app update.
 
 ## Licence
 

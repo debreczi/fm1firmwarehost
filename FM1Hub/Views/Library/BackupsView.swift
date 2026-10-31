@@ -100,7 +100,7 @@ struct SnapshotDetailView: View {
     @State private var editing = false
 
     /// The firmwares this backup's identity may belong to.
-    private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
+    private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity).filter { !$0.needsOwnInstaller } }
     private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
 
     private var musicFacts: String {
@@ -128,14 +128,15 @@ struct SnapshotDetailView: View {
                         Button { confirmRestore = true } label: { Label("Restore the firmware", systemImage: "arrow.counterclockwise") }
                             .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
                         if unconfirmed {
-                            Text("The app can't confirm that this package is the firmware that was on your FM-1: other firmwares can report \(snapshot.identity) too.")
+                            Text("The app can't confirm that this package is the firmware that was on your FM-1: it only reports \(snapshot.identity), and other firmwares may use that number too.")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
                             if !sharing.isEmpty {
                                 NavigationLink { FirmwareChoiceView(snapshot: snapshot, firmwares: sharing) } label: { Label("Choose another firmware", systemImage: "list.bullet") }
                                     .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
                             }
+                            AttachPackageView(snapshot: $snapshot)
                         } else if !snapshot.packageExact {
-                            Text("The FM-1 reported \(snapshot.identity), and the package saved is the hub's \(snapshot.firmwareName) \(snapshot.version ?? ""), which reports something else. It may not be what was on your FM-1.")
+                            Text("The FM-1 reported \(snapshot.identity). The package saved is \(snapshot.firmwareName) \(snapshot.version ?? ""), which may not be the version that was on it.")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
                         }
                     } else {
@@ -236,12 +237,12 @@ struct FirmwareChoiceView: View {
         let last = library.history.first { $0.success && $0.identityAfter == snapshot.identity && $0.date <= snapshot.date }?.firmwareId
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Several firmwares can report \(snapshot.identity). Choose the one that was on your FM-1 when you made this backup, and its package from the hub goes into it.")
+                Text("\(firmwares.count > 1 ? "Several firmwares" : firmwares[0].name) can report \(snapshot.identity). Choose what was on your FM-1 when you made this backup, and the hub's package of it goes into the backup. The hub keeps only each firmware's newest version.")
                     .font(.system(size: 14)).foregroundStyle(Theme.textDim)
-                if let said = snapshot.reportedName {
+                if let said = snapshot.reportedName, firmwares.contains(where: { $0.versionSaid(in: said) != nil }) {
                     Text("It called itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
                 }
-                ForEach(Firmware.likeliestFirst(firmwares.filter { !$0.needsOwnInstaller }, reported: snapshot.reportedName, lastInstalled: last)) { f in
+                ForEach(Firmware.likeliestFirst(firmwares, reported: snapshot.reportedName, lastInstalled: last)) { f in
                     Button { device.attachFirmware(f, to: snapshot); dismiss() } label: {
                         HStack(spacing: 12) {
                             HubImage(url: f.imageURL, tint: Look.colour(for: f.id)).frame(width: 56, height: 44).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -274,9 +275,11 @@ struct AttachPackageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("No firmware package in this backup", systemImage: "shippingbox").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
-            Text(snapshot.packageNote ?? "The FM-1 reported \(snapshot.identity), and no package with that identity could be found on the hub, on this phone or among the makers' releases.")
-                .font(.system(size: 13)).foregroundStyle(Theme.textDim)
+            if !snapshot.hasPackage {
+                Label("No firmware package in this backup", systemImage: "shippingbox").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
+                Text(snapshot.packageNote ?? "The FM-1 reported \(snapshot.identity), and no package with that identity could be found on the hub, on this phone or among the makers' releases.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.textDim)
+            }
             Button { importing = true } label: { Label("Pick its .fwsc from Files", systemImage: "folder") }.buttonStyle(SecondaryButtonStyle())
             if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Theme.err) }
         }

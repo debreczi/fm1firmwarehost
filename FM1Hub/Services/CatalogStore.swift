@@ -91,13 +91,13 @@ final class CatalogStore {
 
     /// A backup whose package nothing ties to the firmware that was on the device.
     func packageIsUnconfirmed(in s: Snapshot) -> Bool {
-        guard s.hasPackage, s.packageConfirmed != true else { return false }
+        guard !Demo.isOn, s.hasPackage, s.packageConfirmed != true else { return false }
         return identityIsAmbiguous(s.identity) || firmwares(reporting: s.identity).count > 1 || (!s.packageExact && s.version == nil)
     }
 
     /// The firmware behind an identity string, as the hub's whoIs(): an exact product match names one, a family
     /// range (the "ident" pattern) names one when only one matches. What the device says of itself (`reported`) can name
-    /// one among those the identity may be, and can name one whose package has another identity: another version of it.
+    /// one among those the identity may be: its name and version are the hub's, or its name with another version.
     func whoIs(_ text: String?, named reported: String? = nil) -> WhoIs? {
         guard let text = text, !text.isEmpty else { return nil }
         let may = firmwares(reporting: text)
@@ -106,6 +106,8 @@ final class CatalogStore {
         if text == "FM-1_000" { return WhoIs(firmware: nil, exact: true, name: "the USB rescue mode (FM-1_000)") }
         if text.lowercased().hasPrefix("ota-") { return WhoIs(firmware: nil, exact: true, name: "the update loader (\(text))") }
         if let f = Firmware.named(reported, among: may) { return WhoIs(firmware: f, exact: f.product == text, name: f.name) }
+        let sameName = may.filter { $0.versionSaid(in: reported) != nil }
+        if sameName.count == 1 { return WhoIs(firmware: sameName[0], exact: false, name: sameName[0].name) }
         if let v = official { return WhoIs(firmware: nil, exact: false, name: (may.map(\.name) + ["the official firmware (\(v))"]).joined(separator: " or ")) }
         let owners = may.filter { $0.product == text }
         if owners.count == 1 { return WhoIs(firmware: owners[0], exact: true, name: owners[0].name) }

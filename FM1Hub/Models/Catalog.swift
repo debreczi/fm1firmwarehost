@@ -125,12 +125,23 @@ struct Firmware: Codable, Identifiable, Hashable {
         return hits.count == 1 ? hits[0] : nil
     }
 
+    /// The version a device's own words give for this firmware, if they name it: "2.8.3" from "SLOOP 2.8.3".
+    func versionSaid(in reported: String?) -> String? {
+        guard let said = reported?.trimmingCharacters(in: .whitespaces), said.lowercased().hasPrefix(name.lowercased() + " ") else { return nil }
+        let rest = said.dropFirst(name.count + 1)
+        return rest.first?.isNumber == true ? String(rest) : nil
+    }
+
+    /// Did the device itself name this very package, on this identity?
+    func isNamed(by reported: String?, identity: String) -> Bool {
+        product == identity && Firmware.named(reported, among: [self]) != nil
+    }
+
     /// Those sharing an identity, the likeliest first: the one whose name the device used, the one last installed with
     /// this app, then the most installed.
     static func likeliestFirst(_ all: [Firmware], reported: String?, lastInstalled: String?) -> [Firmware] {
-        let said = reported?.lowercased() ?? ""
         func rank(_ f: Firmware) -> Int {
-            if !said.isEmpty, said.hasPrefix(f.name.lowercased()) { return 0 }
+            if f.versionSaid(in: reported) != nil { return 0 }
             return f.id == lastInstalled ? 1 : 2
         }
         return all.sorted {
@@ -179,7 +190,7 @@ enum HubAPI {
     /// M-VAVE's current official FM-1 firmware, the file behind "PC Firmware > FM-1" on m-vave.com/download.
     static let officialLatest = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc")!
     static let officialNotes = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/releaseNote/firmware/FM-1.txt")!
-    static func releases(repo: String) -> URL { URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=4")! }
+    static func releases(repo: String, count: Int = 4) -> URL { URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(count)")! }
 
     static func url(_ path: String) -> URL {
         if let u = URL(string: path), u.scheme != nil { return u }

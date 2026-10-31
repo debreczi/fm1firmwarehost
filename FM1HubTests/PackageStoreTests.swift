@@ -5,6 +5,17 @@ import XCTest
 /// rebuilt between two attempts keeps its identity and changes its hash. These tests pin that lookup down.
 final class PackageStoreTests: XCTestCase {
 
+    func testAReleaseCarriesExactlyItsVersion() {
+        XCTAssertTrue(PackageStore.carries(version: "2.8.3", "v2.8.3"))
+        XCTAssertTrue(PackageStore.carries(version: "2.8.3", "sloop-2.8.3.fwsc"))
+        XCTAssertTrue(PackageStore.carries(version: "2.8", "sloop-2.8.fwsc"))
+        XCTAssertTrue(PackageStore.carries(version: "0.26.0", "drum-v0.26.0"))
+        XCTAssertFalse(PackageStore.carries(version: "2.8", "v2.8.4"), "2.8 is not 2.8.4")
+        XCTAssertFalse(PackageStore.carries(version: "8.4", "v2.8.4"))
+        XCTAssertFalse(PackageStore.carries(version: "2.8.3", "sloop-2.8.31.fwsc"))
+        XCTAssertFalse(PackageStore.carries(version: "2.8.3", "2x8x3"), "a dot means a dot")
+    }
+
     func testACustomFirmwareOnAnOldOfficialNumberIsNotTheLatestOfficial() throws {
         let store = PackageStore.shared
         let custom = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_007", payload: 1024))

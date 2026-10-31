@@ -7,7 +7,7 @@ private final class FakeSloop: EditorLink {
     var objects: [Int: [UInt8]]
     var said = "FELUCCA SLOOP 2.8.4"    // editor.c: ed_str("FELUCCA " FELUCCA_VERSION, 24)
     var params: UInt8 = 71
-    var proto: UInt8? = 11
+    var proto: UInt8? = 12
     var playing = false             // commits of projects, banks and settings answer rc 3
     var refused: Set<Int> = []      // a firmware older than these objects answers their begin with 5
     var sampleFails: (cmd: UInt8, rc: UInt8)?
@@ -149,7 +149,7 @@ final class SloopBackupTests: XCTestCase {
         ])
     }
 
-    private static let sloop = EditorInfo(version: "FELUCCA SLOOP 2.8.4", paramCount: 71, protocolVersion: 11)
+    private static let sloop = EditorInfo(version: "FELUCCA SLOOP 2.8.4", paramCount: 71, protocolVersion: 12)
 
     private func capture(_ device: FakeSloop) async throws -> SloopArchive {
         try await SloopBackup.capture(device, info: Self.sloop) { _, _ in }

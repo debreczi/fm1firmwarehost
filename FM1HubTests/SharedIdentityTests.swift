@@ -41,7 +41,7 @@ final class SharedIdentityTests: XCTestCase {
     }
 
     func testAnythingLessNamesNone() {
-        for said in ["SLOOP 2.4.1", "SLOOP", "2.8.4", "DRUM-DEV", "", "SLOOP Floyd FM 2.4"] {
+        for said in ["SLOOP", "2.8.4", "DRUM-DEV", "", "SLOOP Floyd FM 2.4", "SLOOP beta"] {
             XCTAssertNil(catalog().whoIs("FM-1_900", named: said)?.firmware, said)
         }
         XCTAssertNil(catalog().whoIs("FM-1_900", named: nil)?.firmware)
@@ -128,6 +128,42 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertFalse(c.identityIsAmbiguous("FM-1_016"), "M-VAVE's own numbers need no catalogue")
     }
 
+    func testItsNameWithAnotherVersionNamesItAsAnotherVersion() {
+        let w = catalog().whoIs("FM-1_900", named: "SLOOP 2.8.3")
+        XCTAssertEqual(w?.firmware?.id, "sloop")
+        XCTAssertEqual(w?.exact, false, "so the hub's 2.8.4 is not taken for it")
+        let floyd = catalog().whoIs("FM-1_924", named: "SLOOP Floyd FM 2.3")
+        XCTAssertEqual(floyd?.firmware?.id, "floyd")
+        XCTAssertEqual(floyd?.exact, false, "a firmware alone on its number can still say it is not the hub's version")
+    }
+
+    func testFirmwaresThatKeptFeluccasNameAreNotTakenForAnotherOfTheirNumber() {
+        // Tuna, Flyfish, Sill and others define v1.6.1 and report FM-1_900; Felucca 8 Patterns is on that number
+        let c = catalog(extra: [Self.entry("felucca8", "Felucca 8 Patterns", "1.6.1", "FM-1_900")])
+        let said = EditorInfo.ownName(of: "FELUCCA v1.6.1")
+        XCTAssertNil(c.whoIs("FM-1_900", named: said)?.firmware)
+        XCTAssertEqual(c.whoIs("FM-1_916", named: said)?.firmware?.id, "felucca", "on Felucca's own range it is Felucca")
+        XCTAssertEqual(c.whoIs("FM-1_916", named: said)?.exact, false)
+    }
+
+    func testTheVersionAFirmwareSays() throws {
+        let sloop = try XCTUnwrap(catalog().firmware(id: "sloop"))
+        XCTAssertEqual(sloop.versionSaid(in: "SLOOP 2.8.3"), "2.8.3")
+        XCTAssertEqual(sloop.versionSaid(in: "sloop 3.0"), "3.0")
+        XCTAssertNil(sloop.versionSaid(in: "SLOOP"))
+        XCTAssertNil(sloop.versionSaid(in: "SLOOP Floyd FM 2.4"))
+        XCTAssertNil(sloop.versionSaid(in: "CLIPPER 1.3"))
+        XCTAssertNil(sloop.versionSaid(in: nil))
+    }
+
+    func testOnlyTheFirmwaresOwnNameAndVersionConfirmAChoice() throws {
+        let sloop = try XCTUnwrap(catalog().firmware(id: "sloop"))
+        XCTAssertTrue(sloop.isNamed(by: "SLOOP 2.8.4", identity: "FM-1_900"), "the hub was out of reach when the backup was made")
+        XCTAssertFalse(sloop.isNamed(by: "SLOOP 2.8.3", identity: "FM-1_900"))
+        XCTAssertFalse(sloop.isNamed(by: nil, identity: "FM-1_900"))
+        XCTAssertFalse(sloop.isNamed(by: "SLOOP 2.8.4", identity: "FM-1_924"))
+    }
+
     func testAFirmwareCanNotBeNamedOutsideTheIdentityItReports() {
         XCTAssertNil(catalog().whoIs("FM-1_900", named: "Felucca 1.8.0")?.firmware)
     }
@@ -202,6 +238,12 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertFalse(c.packageIsUnconfirmed(in: own), "the hub's other version of a firmware it does know")
         own.version = nil
         XCTAssertTrue(c.packageIsUnconfirmed(in: own), "found by its number alone")
+
+        var official = aBackup(identity: "FM-1_016", name: "Official firmware")
+        official.packageFile = "package.fwsc"
+        official.packageExact = true
+        official.version = "V16"
+        XCTAssertFalse(c.packageIsUnconfirmed(in: official), "no other firmware has M-VAVE's own number")
     }
 
     // MARK: What a package file says

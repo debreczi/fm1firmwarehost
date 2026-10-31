@@ -116,13 +116,19 @@ final class PackageStore {
         let assets: [Asset]
     }
 
-    /// The release package that reports `product`, among the latest releases of the candidates' repositories.
-    /// `onStatus` names what is being tried, for the progress sheet.
-    func releasePackage(product: String, candidates: [Firmware], onStatus: @escaping (String) -> Void) async -> FWSCPackage? {
+    /// Does this release tag or file name carry exactly this version? 2.8 is not 2.8.4.
+    static func carries(version: String, _ text: String) -> Bool {
+        let pattern = "(?<![0-9.])" + NSRegularExpression.escapedPattern(for: version) + "(?![0-9]|\\.[0-9])"
+        return text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// The release package that reports `product`, among the latest releases of the candidates' repositories; with
+    /// `version`, only that version, further back. `onStatus` names what is being tried, for the progress sheet.
+    func releasePackage(product: String, candidates: [Firmware], version: String? = nil, onStatus: @escaping (String) -> Void) async -> FWSCPackage? {
         for f in candidates {
             guard let repo = f.repo, !repo.isEmpty else { continue }
             onStatus("Checking \(f.name)'s releases on GitHub…")
-            var req = URLRequest(url: HubAPI.releases(repo: repo))
+            var req = URLRequest(url: HubAPI.releases(repo: repo, count: version == nil ? 4 : 30))
             req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             req.timeoutInterval = 20
             guard let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -132,6 +138,7 @@ final class PackageStore {
             var assets: [(String, Release.Asset)] = []
             for r in releases {
                 let fw = r.assets.filter { $0.name.lowercased().hasSuffix(".fwsc") && $0.size > 100_000 && $0.size < 4_000_000 }
+                    .filter { a in version.map { PackageStore.carries(version: $0, r.tag_name) || PackageStore.carries(version: $0, a.name) } ?? true }
                     .sorted { ($0.name.lowercased().contains("smk") ? 1 : 0) < ($1.name.lowercased().contains("smk") ? 1 : 0) }
                 for a in fw { assets.append((r.tag_name, a)) }
             }
