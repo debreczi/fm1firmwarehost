@@ -4,7 +4,7 @@
 //
 // Complete musical archives of SLOOP and the firmwares built on it: the working project, the settings, the song
 // sections, the user presets, the FM6 bank, the SYN kits, the MIDI map, the theme and the sample slots. The file is the
-// editor's own ("sloop-backup" v1), so an archive made here opens in the SLOOP web editor and back.
+// editor's own ("sloop-backup" v1), so an archive made here opens in the SLOOP web editor.
 
 import Foundation
 
@@ -32,9 +32,18 @@ struct SloopArchive: Codable {
 
 /// What a firmware of the editor protocol says about itself (INFO).
 struct EditorInfo: Equatable {
-    let version: String         // "SLOOP 2.8.4"
+    let version: String         // "FELUCCA SLOOP 2.8.4"
     let paramCount: Int
     let protocolVersion: Int    // 0 on firmware older than protocol v5
+
+    /// The firmware's own name: "SLOOP 2.8.4". This protocol's firmwares send it after Felucca's, which stays when a
+    /// version follows it: "FELUCCA 1.8.0".
+    static func ownName(of version: String) -> String {
+        let prefix = "FELUCCA "
+        guard version.hasPrefix(prefix), let next = version.dropFirst(prefix.count).first, !next.isNumber else { return version }
+        return String(version.dropFirst(prefix.count))
+    }
+    var name: String { EditorInfo.ownName(of: version) }
 
     /// Backup and restore came with protocol v6 (SLOOP 2.3).
     var hasBackup: Bool { protocolVersion >= 6 }
@@ -44,7 +53,13 @@ struct EditorInfo: Equatable {
 
 /// One request and its reply over the editor protocol.
 protocol EditorLink {
-    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int) async throws -> [UInt8]
+    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int, accepts: ([UInt8]) -> Bool) async throws -> [UInt8]
+}
+
+private extension EditorLink {
+    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int) async throws -> [UInt8] {
+        try await request(cmd, args, timeout: timeout, retries: retries, accepts: { _ in true })
+    }
 }
 
 extension FeluccaLink: EditorLink {}
@@ -60,11 +75,18 @@ enum SloopBackup {
     }
     static let chunk = 256
     static let sampleDataOffset = 512, sampleHeaderLength = 480
-    /// The order they are written back: banks, song sections, the working project, then the settings.
-    static let restoreOrder = [6, 7, 8, 9, 10, 11, 2, 3, 4, 5, 0, 1]
+    /// The order they are written back: banks, song sections, the working project, then the settings. Objects only a
+    /// firmware built on SLOOP has (Clipper's 12-14) go with the banks.
+    static let banks = [6, 7, 8, 9, 10, 11], projects = [2, 3, 4, 5, 0, 1]
     static let sampleIds = [32, 33, 34, 35]
-    /// Objects a firmware older than the file may not have: it answers their begin with 1 or 5, and they are skipped.
-    static let optionalIds: Set<Int> = [8, 9, 10, 11]
+    /// Every object but these may be missing from a firmware older than the file, or from another of the family: it
+    /// answers their begin with 1 or 5, and they are skipped.
+    static let requiredIds: Set<Int> = [0, 1, 2, 3, 4, 5, 6, 7]
+
+    static func restoreOrder(of ids: some Sequence<Int>) -> [Int] {
+        let known = Set(banks + projects + sampleIds)
+        return banks + ids.filter { !known.contains($0) }.sorted() + projects
+    }
     /// Far above any object an FM-1 can hold: a manifest may not make the phone allocate more than this for one.
     static let maxObjectSize = 1 << 20
 
@@ -103,7 +125,7 @@ enum SloopBackup {
             let p = 2 + k * 11
             let id = Int(a[p]), len = Int(try SevenBit.r32(a, p + 1)), crc = try SevenBit.r32(a, p + 6)
             guard len <= maxObjectSize else { throw FM1Error.protocolError("Archive object too large") }
-            guard !out.contains(where: { $0.id == id }) else { throw FM1Error.protocolError("Unexpected archive object") }
+            guard id <= 127, !out.contains(where: { $0.id == id }) else { throw FM1Error.protocolError("Unexpected archive object") }
             out.append(ManifestEntry(id: id, len: len, crc: crc))
         }
         guard out.contains(where: { $0.id == 0 }), out.contains(where: { $0.id == 1 }) else {
@@ -138,7 +160,9 @@ enum SloopBackup {
             var off = 0
             while off < o.len {
                 let size = min(chunk, o.len - off)
-                let a = try await fl.request(Cmd.get, [UInt8(o.id & 0x7F)] + SevenBit.u32(UInt32(off)) + [UInt8(size & 127), UInt8(size >> 7)], timeout: 1.5, retries: 2)
+                let at = SevenBit.u32(UInt32(off))
+                let a = try await fl.request(Cmd.get, [UInt8(o.id)] + at + [UInt8(size & 127), UInt8(size >> 7)], timeout: 1.5, retries: 2,
+                                             accepts: { $0.count >= 7 && Int($0[0]) == o.id && Array($0[2..<7]) == at })
                 guard a.count >= 9 else { throw FM1Error.protocolError("Short backup reply") }
                 try FeluccaBackup.check(a[1])
                 guard Int(a[0]) == o.id, try SevenBit.r32(a, 2) == UInt32(off), (Int(a[7]) | Int(a[8]) << 7) == size else {
@@ -153,10 +177,10 @@ enum SloopBackup {
             if SevenBit.crc32(bytes) != o.crc { throw FM1Error.protocolError("The device changed during backup. Try again while stopped.") }
             objects.append(SloopArchiveObject(id: o.id, len: o.len, crc: o.crc, data: Data(bytes).base64EncodedString()))
         }
-        let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: info.version,
-                                   date: ISO8601DateFormatter().string(from: Date()), objects: objects)
-        _ = try validate(archive)
-        return archive
+        // Not validated here: the editor keeps whatever the firmware lists, and refusing an object only a later firmware
+        // has would cost the user the backup and, with the automatic backup on, the install. The CRCs were checked above.
+        return SloopArchive(format: SloopArchive.formatName, version: 1, firmware: info.version,
+                            date: ISO8601DateFormatter().string(from: Date()), objects: objects)
     }
 
     /// Every byte checked before the first destructive request. Returns the objects' bytes by id.
@@ -164,7 +188,7 @@ enum SloopBackup {
         guard file.format == SloopArchive.formatName, file.version == 1 else { throw FM1Error.package("Not a SLOOP backup.") }
         var all: [Int: [UInt8]] = [:]
         for o in file.objects {
-            guard restoreOrder.contains(o.id) || sampleIds.contains(o.id), all[o.id] == nil, o.len >= 0, o.len <= maxObjectSize, let bytes = o.bytes else {
+            guard (0...127).contains(o.id), all[o.id] == nil, o.len >= 0, o.len <= maxObjectSize, let bytes = o.bytes else {
                 throw FM1Error.package("Invalid backup object.")
             }
             guard bytes.count == o.len, SevenBit.crc32(bytes) == o.crc else { throw FM1Error.package("Backup checksum mismatch.") }
@@ -173,6 +197,20 @@ enum SloopBackup {
         }
         guard all[0]?.isEmpty == false, all[1]?.isEmpty == false else { throw FM1Error.package("Backup is missing the current music or settings.") }
         return all
+    }
+
+    /// What a sample command's rc means: each command numbers its failures its own way.
+    static func sampleProblem(_ cmd: UInt8, rc: UInt8, slot: UInt8) -> String {
+        let what: String
+        switch (cmd, rc) {
+        case (FeluccaLink.Cmd.smpBegin, _), (FeluccaLink.Cmd.smpErase, _), (FeluccaLink.Cmd.smpWrite, 2): what = "could not be erased"
+        case (FeluccaLink.Cmd.smpWrite, 3), (FeluccaLink.Cmd.smpEnd, 4): what = "could not be written"
+        case (FeluccaLink.Cmd.smpWrite, 4), (FeluccaLink.Cmd.smpEnd, 6): what = "was not open for writing"
+        case (FeluccaLink.Cmd.smpEnd, 3): what = "failed its data check"
+        case (FeluccaLink.Cmd.smpEnd, _): what = "is not a valid sample"
+        default: what = "failed (\(rc))"
+        }
+        return "Sample slot USR\(slot + 1) \(what)."
     }
 
     /// The project format of a backup object ("FUN6" as stored, low byte first), 0 when it is no project.
@@ -210,16 +248,16 @@ enum SloopBackup {
         }
         let total = max(bytesOf.values.reduce(0) { $0 + $1.count }, 1)
         var done = 0
-        func put(_ args: [UInt8], timeout: TimeInterval, retries: Int) async throws -> UInt8 {
-            let a = try await fl.request(Cmd.put, args, timeout: timeout, retries: retries)
-            guard a.count >= 3 else { throw FM1Error.protocolError("Short restore reply") }
+        func put(_ op: UInt8, _ id: UInt8, _ rest: [UInt8] = [], timeout: TimeInterval, retries: Int) async throws -> UInt8 {
+            let a = try await fl.request(Cmd.put, [op, id] + rest, timeout: timeout, retries: retries,
+                                         accepts: { $0.count >= 3 && $0[0] == op && $0[1] == id })
             return a[2]
         }
-        for objectId in restoreOrder {
+        for objectId in restoreOrder(of: bytesOf.keys) {
             guard let d = bytesOf[objectId] else { continue }
             let id = UInt8(objectId)
-            let begun = try await put([Op.begin, id] + SevenBit.u32(UInt32(d.count)) + SevenBit.u32(SevenBit.crc32(d)), timeout: 1.5, retries: 1)
-            if optionalIds.contains(objectId), begun == 1 || begun == 5 {
+            let begun = try await put(Op.begin, id, SevenBit.u32(UInt32(d.count)) + SevenBit.u32(SevenBit.crc32(d)), timeout: 1.5, retries: 1)
+            if !requiredIds.contains(objectId), begun == 1 || begun == 5 {
                 done += d.count
                 onProgress(done, total)
                 continue
@@ -229,14 +267,14 @@ enum SloopBackup {
                 var off = 0
                 while off < d.count {
                     let end = min(off + chunk, d.count)
-                    try FeluccaBackup.check(try await put([Op.data, id] + SevenBit.u32(UInt32(off)) + SevenBit.blockPack(d[off..<end]), timeout: 1.5, retries: 1))
+                    try FeluccaBackup.check(try await put(Op.data, id, SevenBit.u32(UInt32(off)) + SevenBit.blockPack(d[off..<end]), timeout: 1.5, retries: 1))
                     done += end - off
                     onProgress(done, total)
                     off = end
                 }
-                try FeluccaBackup.check(try await put([Op.commit, id], timeout: 5.0, retries: 0))
+                try FeluccaBackup.check(try await put(Op.commit, id, timeout: 5.0, retries: 0))
             } catch {
-                _ = try? await fl.request(Cmd.put, [Op.abort, id], timeout: 1.5, retries: 0)
+                _ = try? await put(Op.abort, id, timeout: 1.5, retries: 0)
                 throw error
             }
         }
@@ -244,9 +282,11 @@ enum SloopBackup {
             guard let d = bytesOf[objectId] else { continue }
             let slot = UInt8(objectId - 32)
             func sample(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int = 0) async throws {
-                let a = try await fl.request(cmd, [slot] + args, timeout: timeout, retries: retries)
-                guard a.count >= 2, a[0] == slot, let rc = a.last else { throw FM1Error.protocolError("Unexpected sample reply") }
-                try FeluccaBackup.check(rc)
+                // SMP_WRITE echoes the offset as well
+                let echoed = cmd == FeluccaLink.Cmd.smpWrite ? Array(args.prefix(3)) : []
+                let a = try await fl.request(cmd, [slot] + args, timeout: timeout, retries: retries,
+                                             accepts: { $0.count >= 2 + echoed.count && $0[0] == slot && Array($0[1..<(1 + echoed.count)]) == echoed })
+                if let rc = a.last, rc != 0 { throw FM1Error.protocolError(sampleProblem(cmd, rc: rc, slot: slot)) }
             }
             if d.isEmpty {
                 try await sample(FeluccaLink.Cmd.smpErase, [], timeout: 2.5)

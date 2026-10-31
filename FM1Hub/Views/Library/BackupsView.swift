@@ -15,7 +15,7 @@ struct BackupsView: View {
                     intro
                     if library.snapshots.isEmpty {
                         EmptyState(icon: "externaldrive", title: "No backups yet",
-                                   text: "A backup remembers which firmware is on your FM-1 and keeps its package, so you can put it back any time. On Felucca and SLOOP firmwares it also saves your music, settings, projects and samples.")
+                                   text: "A backup remembers which firmware is on your FM-1 and keeps its package, so you can put it back any time. If several firmwares can report the same identity, you choose. On Felucca and SLOOP firmwares it also saves your music, settings, projects and samples.")
                     } else {
                         ForEach(library.snapshots) { s in
                             NavigationLink(value: s) { SnapshotCard(snapshot: s) }.buttonStyle(.plain)
@@ -56,6 +56,7 @@ struct BackupsView: View {
 
 struct SnapshotCard: View {
     @Environment(LibraryStore.self) private var library
+    @Environment(CatalogStore.self) private var catalog
     let snapshot: Snapshot
 
     var body: some View {
@@ -73,7 +74,9 @@ struct SnapshotCard: View {
                 Text(snapshot.name).font(.system(size: 16, weight: .bold, design: .rounded)).lineLimit(1)
                 Text("\(snapshot.firmwareName)\(snapshot.version.map { " \($0)" } ?? "") · \(snapshot.identity)").font(.system(size: 12, design: .rounded)).foregroundStyle(Theme.textDim).lineLimit(1)
                 HStack(spacing: 6) {
-                    if snapshot.hasPackage { Chip(text: snapshot.packageExact ? "firmware" : "firmware (hub's version)", icon: "shippingbox", tint: c) }
+                    if snapshot.hasPackage {
+                        Chip(text: catalog.packageIsUnconfirmed(in: snapshot) ? "firmware (unconfirmed)" : snapshot.packageExact ? "firmware" : "firmware (hub's version)", icon: "shippingbox", tint: c)
+                    }
                     if snapshot.hasArchive { Chip(text: "music \(ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file))", icon: "music.note", tint: Theme.ok) }
                 }
                 Text(snapshot.date.shortText).font(.system(size: 11, design: .rounded)).foregroundStyle(Theme.textFaint)
@@ -96,8 +99,9 @@ struct SnapshotDetailView: View {
     @State private var confirmArchive = false
     @State private var editing = false
 
-    /// The firmwares that report this backup's identity. More than one: the identity can't say which it was.
+    /// The firmwares this backup's identity may belong to.
     private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
+    private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
 
     private var musicFacts: String {
         guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
@@ -123,17 +127,19 @@ struct SnapshotDetailView: View {
                     if snapshot.hasPackage {
                         Button { confirmRestore = true } label: { Label("Restore the firmware", systemImage: "arrow.counterclockwise") }
                             .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
-                        if sharing.count > 1, snapshot.packageConfirmed != true {
-                            Text("\(sharing.count) firmwares report \(snapshot.identity), so the app can't confirm that this package is the firmware that was on your FM-1.")
+                        if unconfirmed {
+                            Text("The app can't confirm that this package is the firmware that was on your FM-1: other firmwares can report \(snapshot.identity) too.")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
-                            NavigationLink { FirmwareChoiceView(snapshot: snapshot, firmwares: sharing) } label: { Label("Choose another firmware", systemImage: "list.bullet") }
-                                .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
+                            if !sharing.isEmpty {
+                                NavigationLink { FirmwareChoiceView(snapshot: snapshot, firmwares: sharing) } label: { Label("Choose another firmware", systemImage: "list.bullet") }
+                                    .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
+                            }
                         } else if !snapshot.packageExact {
                             Text("The FM-1 ran another version of \(snapshot.firmwareName) than the hub had (\(snapshot.identity)); the package saved is the hub's \(snapshot.version ?? "").")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
                         }
                     } else {
-                        if sharing.count > 1 {
+                        if !sharing.isEmpty {
                             NavigationLink { FirmwareChoiceView(snapshot: snapshot, firmwares: sharing) } label: { Label("Choose the firmware", systemImage: "list.bullet") }
                                 .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
                         }
@@ -196,10 +202,10 @@ struct SnapshotDetailView: View {
             Button("Save") { library.update(snapshot) }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {
+        .confirmationDialog(snapshot.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {
             Button("Restore the firmware") { device.restoreFirmware(snapshot) }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("Installs the saved package. Restore the music archive afterwards, from this same backup.") }
+        } message: { Text((unconfirmed ? "The app can't confirm this is the firmware that was on your FM-1. " : "") + "Installs the saved package. Restore the music archive afterwards, from this same backup.") }
         .confirmationDialog("Write the music archive to the FM-1?", isPresented: $confirmArchive, titleVisibility: .visible) {
             Button("Restore the music", role: .destructive) { device.restoreArchive(snapshot) }
             Button("Cancel", role: .cancel) {}
@@ -212,8 +218,8 @@ struct SnapshotDetailView: View {
 }
 
 
-/// Several firmwares report this backup's identity and the device did not say which it runs, so the user chooses. The
-/// package comes from the hub, checked against the catalogue.
+/// This backup's identity can't name its firmware and the device did not say, so the user chooses. The package comes from
+/// the hub, checked against the catalogue.
 struct FirmwareChoiceView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(DeviceController.self) private var device
@@ -222,13 +228,14 @@ struct FirmwareChoiceView: View {
     let firmwares: [Firmware]
 
     var body: some View {
-        let last = library.history.first { $0.success && $0.identityAfter == snapshot.identity }?.firmwareId
+        // installed with this app before this backup was made: a later install says nothing about what was on it then
+        let last = library.history.first { $0.success && $0.identityAfter == snapshot.identity && $0.date <= snapshot.date }?.firmwareId
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(firmwares.count) firmwares report \(snapshot.identity). Choose the one on your FM-1, and its package from the hub goes into this backup.")
+                Text("Several firmwares can report \(snapshot.identity). Choose the one that was on your FM-1 when you made this backup, and its package from the hub goes into it.")
                     .font(.system(size: 14)).foregroundStyle(Theme.textDim)
                 if let said = snapshot.reportedName {
-                    Text("It calls itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Text("It called itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
                 }
                 ForEach(Firmware.likeliestFirst(firmwares, reported: snapshot.reportedName, lastInstalled: last)) { f in
                     Button { device.attachFirmware(f, to: snapshot); dismiss() } label: {

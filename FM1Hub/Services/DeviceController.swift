@@ -97,6 +97,11 @@ final class DeviceController {
     /// What a new backup is called until the user says otherwise.
     var backupName: String { identity.map { whoIsName($0) } ?? "" }
     var isConnected: Bool { identity != nil }
+    /// Is this the firmware on the FM-1? An ambiguous identity says so only when the device itself named it.
+    func isRunning(_ f: Firmware) -> Bool {
+        guard identity?.text == f.product else { return false }
+        return !catalog.identityIsAmbiguous(f.product) || whoIs?.firmware?.id == f.id
+    }
     var isBusy: Bool { phase.isBusy }
     var officialLatestVersion: String? { officialLatest.flatMap { FWSCPackage.officialVersion(of: $0) } }
 
@@ -208,9 +213,9 @@ final class DeviceController {
         guard let dev = await openDevice() else { return }
         let music = await SloopBackup.detect(FeluccaLink(link: dev.link))
         dev.link.close()
-        reportedName = music.info?.version
+        reportedName = music.info?.name
         musicBackupSupported = music.kind != nil
-        append("firmware says: \(reportedName ?? "nothing")")
+        append("firmware says: \(music.info?.version ?? "nothing")")
         append(music.kind != nil ? "backup protocol: supported" : "backup protocol: not answered")
     }
 
@@ -370,6 +375,10 @@ final class DeviceController {
     /// resumed with this exact package; the record is cleared only once the device has reported the new identity.
     private func flash(_ pkg: FWSCPackage, product: String, stockLoader: Bool,
                        name: String, version: String, firmwareId: String?, source: InstallSource) async throws -> String {
+        // Cancel reaches the updater of the moment, and the updater made here starts afresh: one pressed before now, or
+        // while the loader is asked for below, is only remembered by the task.
+        if Task.isCancelled { throw FM1Error.cancelled }
+        reportedName = nil       // whatever this leaves on the FM-1, it is no longer known to be what spoke before
         let up = makeUpdater()
         let image = pkg.logicalImage
         try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
@@ -401,6 +410,7 @@ final class DeviceController {
                     throw FM1Error.stopped("The loader stopped before the end. Replug and press Install again.")
                 }
             } else {
+                if Task.isCancelled { throw FM1Error.cancelled }
                 after = try await up.install(image: image, product: product, beforeWriting: record,
                                              onStep: { s in Task { @MainActor in self.phase = .installing(s) } })
             }
@@ -492,25 +502,53 @@ final class DeviceController {
         guard settings.autoSnapshotBeforeInstall else { return }
         guard let dev = await openDevice() else { return }
         let fl = FeluccaLink(link: dev.link)
-        let music = await SloopBackup.detect(fl)
-        guard music.kind != nil else { dev.link.close(); return }
-        append("auto backup before install")
-        identity = dev.identity
         do {
+            let music = try await detectMusic(fl)
+            guard music.kind != nil else { dev.link.close(); return }
+            append("auto backup before install")
+            identity = dev.identity
             let s = try await makeSnapshot(dev: dev, fl: fl, music: music, name: nil, prefix: "Before install · ")
             library.add(s)
         } catch {
             append("auto backup failed: \(error.localizedDescription)")
             dev.link.close()
-            throw FM1Error.stopped("The backup before the install failed (\(error.localizedDescription)). Nothing was written. Stop playback on the FM-1 and try again, or turn the automatic backup off in Settings.")
+            throw FM1Error.backup("The backup before the install failed (\(error.localizedDescription)). Nothing was written. Stop playback on the FM-1 and try again, or turn the automatic backup off in Settings.")
         }
         dev.link.close()
+    }
+
+    /// Which music backup the firmware answers. One that answered at Connect and now says nothing has lost a reply, not
+    /// its backup: that is asked again and, failing that, an error rather than a backup without the music.
+    private func detectMusic(_ fl: FeluccaLink) async throws -> (info: EditorInfo?, kind: MusicBackupKind?) {
+        let music = await SloopBackup.detect(fl)
+        guard music.kind == nil, musicBackupSupported == true else { return music }
+        let again = await SloopBackup.detect(fl)
+        if again.kind == nil { throw FM1Error.stopped("The FM-1 answered the music backup earlier, but not now.") }
+        return again
+    }
+
+    /// A backup only reads, so the advice for a stopped update does not apply to it.
+    private func backupFailure(_ error: Error) -> Error {
+        guard let e = error as? FM1Error else { return error }
+        switch e {
+        case .stopped, .lost: return FM1Error.backup(e.localizedDescription + " Nothing on the FM-1 was changed. Stop playback and try again.")
+        default: return e
+        }
+    }
+
+    /// A restore replaces the music object by object, each on its own, so one that stops has done part of it.
+    private func restoreFailure(_ error: Error) -> Error {
+        guard let e = error as? FM1Error, !e.nothingWritten else { return error }
+        if case .cancelled = e { return e }
+        var text = e.localizedDescription
+        if case .stopped = e { text = "The FM-1 stopped answering." }
+        return FM1Error.protocolError(text + " Part of your music may already be replaced. Restoring again is safe.")
     }
 
     private func whoIsName(_ id: FM1Identity) -> String {
         let w = catalog.whoIs(id.text, named: reportedName)
         if let f = w?.firmware { return f.name + (w?.exact == true ? " \(f.version)" : "") }
-        if catalog.firmwares(reporting: id.text).count > 1 { return reportedName ?? id.text }
+        if catalog.identityIsAmbiguous(id.text) { return reportedName ?? id.text }
         return w?.name ?? id.text
     }
 
@@ -525,19 +563,18 @@ final class DeviceController {
             identity = dev.identity
             identityDate = Date()
             let fl = FeluccaLink(link: dev.link)
-            let music = await SloopBackup.detect(fl)
             let s: Snapshot
             do {
+                let music = try await detectMusic(fl)
                 s = try await makeSnapshot(dev: dev, fl: fl, music: music, name: name)
             } catch {
                 dev.link.close()
-                throw error
+                throw backupFailure(error)
             }
             dev.link.close()
             library.add(s)
             j.title = s.name
-            let shared = catalog.firmwares(reporting: s.identity).count > 1
-            let pkgText = s.hasPackage ? "its firmware package" : shared ? "no firmware package yet (choose yours in the backup)" : "no firmware package (see the backup for why)"
+            let pkgText = s.hasPackage ? "its firmware package" : catalog.identityIsAmbiguous(s.identity) ? "no firmware package yet (choose yours in the backup)" : "no firmware package (see the backup for why)"
             let musicText = s.hasArchive
                 ? "and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))"
                 : "but no music archive: this firmware has no backup over USB that the app knows"
@@ -548,8 +585,14 @@ final class DeviceController {
     }
 
     private func makeSnapshot(dev: FM1Device, fl: FeluccaLink, music: (info: EditorInfo?, kind: MusicBackupKind?), name: String?, prefix: String = "") async throws -> Snapshot {
-        reportedName = music.info?.version
+        // which firmware this is can't be worked out without the catalogue
+        if catalog.firmwares.isEmpty {
+            phase = .searching("Loading the hub's catalogue…")
+            await catalog.refresh(force: true)
+        }
+        reportedName = music.info?.name
         let who = catalog.whoIs(dev.identity.text, named: reportedName)
+        let ambiguous = catalog.identityIsAmbiguous(dev.identity.text)
         var s = Snapshot(name: name ?? prefix + whoIsName(dev.identity), identity: dev.identity.text, firmwareId: who?.firmware?.id,
                          firmwareName: who?.firmware?.name ?? who?.name ?? dev.identity.text,
                          version: who?.exact == true ? who?.firmware?.version : nil, product: nil, packageFile: nil,
@@ -584,16 +627,20 @@ final class DeviceController {
             musicBackupSupported = false
         }
         // the package: wherever it is
-        let sharing = catalog.firmwares(reporting: dev.identity.text).count
-        if let found = await findPackage(for: dev.identity.text, who: who) {
+        if let found = await findPackage(for: dev.identity.text, who: who, ambiguous: ambiguous) {
             let (pkg, from) = found
-            // with a shared identity the only package findPackage returns is the one the device itself named
-            try storePackage(pkg, in: &s, confirmed: sharing > 1)
+            // with an ambiguous identity the only package findPackage returns is the one the device itself named
+            try storePackage(pkg, in: &s, confirmed: ambiguous && who?.exact == true)
+            // found by its identity alone, in the releases of whichever maker has that number: nothing ties it to this FM-1
+            if from == "GitHub release", who?.firmware == nil { s.packageExact = false }
             append("package for \(dev.identity.text): \(from)")
-        } else if sharing > 1 {
+        } else if catalog.firmwares.isEmpty {
+            s.notes = "The hub's catalogue could not be loaded, so the app can't tell which firmware this is. Open this backup again when the phone is online."
+            append("no catalogue: no package for \(dev.identity.text)")
+        } else if ambiguous {
             s.notes = who?.firmware.map { "\($0.name) \($0.version) could not be loaded from the hub. Choose it below when the phone is online." }
-                ?? "\(sharing) firmwares report \(dev.identity.text), and this one did not say which it is. Choose yours and this backup becomes restorable."
-            append("\(sharing) firmwares report \(dev.identity.text): no package chosen")
+                ?? "Several firmwares can report \(dev.identity.text), and this one did not say which it is. Choose yours and this backup becomes restorable."
+            append("\(dev.identity.text) is ambiguous: no package chosen")
         } else {
             s.notes = "No package found for \(dev.identity.text): not on the hub, not on this phone, not among the makers' GitHub releases. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
             append("no package found for \(dev.identity.text)")
@@ -603,13 +650,13 @@ final class DeviceController {
 
     /// Where a package with this identity can be: the hub's catalogue, this phone, the maker's GitHub releases,
     /// M-VAVE's server for official versions. The first hit wins. Returns the package and where it came from.
-    private func findPackage(for identity: String, who: WhoIs?) async -> (FWSCPackage, String)? {
+    private func findPackage(for identity: String, who: WhoIs?, ambiguous: Bool) async -> (FWSCPackage, String)? {
         if let f = who?.firmware, f.product == identity {
             phase = .searching("The hub has \(f.name) \(f.version).")
             if let p = try? await packages.package(for: f) { return (p, "hub") }
         }
-        // Several firmwares report this identity, so any other package with it may be another firmware. Never guess.
-        if catalog.firmwares(reporting: identity).count > 1 { return nil }
+        // Any other package with this identity may be another firmware. Never guess.
+        if ambiguous { return nil }
         phase = .searching("Looking on this phone…")
         if let p = packages.localPackage(product: identity) { return (p, "phone") }
         if FWSCPackage.isOfficialProduct(identity) {
@@ -617,7 +664,7 @@ final class DeviceController {
             phase = .searching("Asking M-VAVE's server…")
             if let p = try? await packages.officialLatest(), p.product == identity { return (p, "m-vave.com") }
         }
-        let candidates = catalog.familyCandidates(for: identity)
+        let candidates = who?.firmware.map { [$0] } ?? catalog.familyCandidates(for: identity)
         if !candidates.isEmpty {
             phase = .searching("Checking the makers' releases on GitHub…")
             if let p = await packages.releasePackage(product: identity, candidates: candidates, onStatus: { t in Task { @MainActor in self.phase = .searching(t) } }) {
@@ -627,29 +674,30 @@ final class DeviceController {
         return nil
     }
 
-    /// `confirmed`: the identity is shared, and the device itself named this firmware. Without that, a shared identity
+    /// `confirmed`: the identity is ambiguous, and the device itself named this firmware. Without that, such an identity
     /// says nothing about which firmware the package is, or whether it is the one that was on the device.
     private func storePackage(_ pkg: FWSCPackage, in s: inout Snapshot, confirmed: Bool = false) throws {
         let folder = library.folder(for: s)
         Paths.ensure(folder)
         try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
-        let shared = catalog.firmwares(reporting: pkg.product).count > 1
+        let ambiguous = catalog.identityIsAmbiguous(s.identity)
+        let hadPackage = s.hasPackage
         s.packageFile = "package.fwsc"
         s.packageSHA256 = pkg.sha256
         s.packageSize = pkg.bytes.count
         s.product = pkg.product
-        s.packageExact = pkg.product == s.identity && (!shared || confirmed)
+        s.packageExact = pkg.product == s.identity && (!ambiguous || confirmed)
         s.packageConfirmed = confirmed ? true : nil
         if let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
         else if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
-        else if shared { s.version = nil; s.firmwareId = nil; s.firmwareName = catalog.whoIs(pkg.product)?.name ?? pkg.product }
+        else if ambiguous { s.version = nil; s.firmwareId = nil; s.firmwareName = catalog.whoIs(s.identity)?.name ?? s.identity }
         else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
-        s.notes = ""
+        if !hadPackage { s.notes = "" }   // the app's own word on why there was none; after that the notes are the user's
     }
 
-    /// A backup whose identity several firmwares share, completed with the one the user says it is, from the hub.
+    /// A backup whose identity can't name its firmware, completed with the one the user says it is, from the hub.
     func attachFirmware(_ f: Firmware, to snapshot: Snapshot) {
-        guard !isBusy, f.product == snapshot.identity else { return }
+        guard !isBusy, catalog.firmwares(reporting: snapshot.identity).contains(f) else { return }
         var j = DeviceJob(kind: .snapshot, title: snapshot.name, subtitle: "\(f.name) \(f.version)", colour: Look.colour(for: f.id), imageURL: f.imageURL)
         start(job: j) { [self] in
             phase = .searching("The hub has \(f.name) \(f.version).")
@@ -669,7 +717,8 @@ final class DeviceController {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let pkg = try FWSCPackage(data: try Data(contentsOf: url))
-            guard pkg.product == s.identity else { return "That file is \(pkg.product); this backup needs \(s.identity)." }
+            // a backup recovered from a SLOOP archive alone knows no identity to hold the file to
+            guard pkg.product == s.identity || !s.identity.hasPrefix("FM-1_") else { return "That file is \(pkg.product); this backup needs \(s.identity)." }
             try? packages.keep(pkg)
             try storePackage(pkg, in: &s)
             library.update(s)
@@ -740,20 +789,20 @@ final class DeviceController {
         identity = dev.identity
         let fl = FeluccaLink(link: dev.link)
         let music = await SloopBackup.detect(fl)
-        reportedName = music.info?.version
+        reportedName = music.info?.name
         guard music.kind == .sloop, let info = music.info else {
             dev.link.close()
-            throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.version ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(firmwareName) first, then the music.")
+            throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.name ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(firmwareName) first, then the music.")
         }
         phase = .restoring(0, archive.totalBytes)
         do {
             try await SloopBackup.restore(fl, archive, info: info) { d, t in Task { @MainActor in self.phase = .restoring(d, t) } }
         } catch {
             dev.link.close()
-            throw error
+            throw restoreFailure(error)
         }
         dev.link.close()
-        return "The music archive is back on your FM-1" + (archive.firmware != info.version ? " (it was made on \(archive.firmware), the FM-1 runs \(info.version))." : ".")
+        return "The music archive is back on your FM-1" + (archive.firmware != info.version ? " (it was made on \(EditorInfo.ownName(of: archive.firmware)), the FM-1 runs \(info.name))." : ".")
     }
 
     func dismissJob() {

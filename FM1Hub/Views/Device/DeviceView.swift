@@ -125,7 +125,7 @@ struct DeviceView: View {
                 Button { snapshotName = device.backupName; askName = true } label: {
                     Label("Back up the FM-1 now", systemImage: "externaldrive.badge.plus")
                 }.buttonStyle(PrimaryButtonStyle(tint: Theme.accent)).disabled(device.isBusy)
-                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases) and, on Felucca and SLOOP firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
+                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases; if several firmwares can report the same identity, you choose) and, on Felucca and SLOOP firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
                     .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
             }
             .padding(14).card()

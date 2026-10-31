@@ -114,7 +114,7 @@ final class LibraryStoreTests: XCTestCase {
             let id = UUID()
             let dir = folder.appendingPathComponent("Snapshots/\(id.uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: "SLOOP 2.8.4", date: "2026-10-31T08:00:00Z",
+            let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: "FELUCCA SLOOP 2.8.4", date: "2026-10-31T08:00:00Z",
                                        objects: [SloopArchiveObject(id: 1, len: 0, crc: 0, data: "")])
             try JSONEncoder().encode(archive).write(to: dir.appendingPathComponent(SloopArchive.fileName))
 
@@ -124,6 +124,20 @@ final class LibraryStoreTests: XCTestCase {
             XCTAssertEqual(found.firmwareName, "SLOOP 2.8.4")
             XCTAssertEqual(found.reportedName, "SLOOP 2.8.4")
             XCTAssertEqual(found.date, ISO8601DateFormatter().date(from: archive.date))
+        }
+    }
+
+    func testAPackageBesideASloopArchiveIsNotTakenForExact() throws {
+        try withCleanLibrary {
+            let dir = folder.appendingPathComponent("Snapshots/\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: "FELUCCA SLOOP 2.8.4", date: "2026-10-31T08:00:00Z", objects: [])
+            try JSONEncoder().encode(archive).write(to: dir.appendingPathComponent(SloopArchive.fileName))
+            try FWSCPackageTests.makePackage(product: "FM-1_900").write(to: dir.appendingPathComponent("package.fwsc"))
+
+            let found = try XCTUnwrap(LibraryStore(folder: folder).snapshots.first)
+            XCTAssertEqual(found.identity, "FM-1_900")
+            XCTAssertFalse(found.packageExact)
         }
     }
 

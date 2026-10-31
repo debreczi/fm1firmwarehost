@@ -236,18 +236,20 @@ final class LibraryStore {
             let archive = (try? Data(contentsOf: arcURL)).flatMap { try? JSONDecoder().decode(FeluccaArchive.self, from: $0) }
             let sloop = (try? Data(contentsOf: sloopURL)).flatMap { try? JSONDecoder().decode(SloopArchive.self, from: $0) }
             // a SLOOP archive names the firmware ("SLOOP 2.8.4"), not its identity
-            guard let identity = archive?.firmware ?? pkg?.product ?? sloop?.firmware else { continue }   // an empty folder holds nothing to restore
+            let sloopName = sloop.map { EditorInfo.ownName(of: $0.firmware) }
+            guard let identity = archive?.firmware ?? pkg?.product ?? sloopName else { continue }   // an empty folder holds nothing to restore
             let created = archive.flatMap { ISO8601DateFormatter().date(from: $0.created) }
                 ?? sloop.flatMap { ISO8601DateFormatter().date(from: $0.date) }
                 ?? (try? dir.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
             var s = Snapshot(name: "Recovered backup · \(identity)", identity: identity, firmwareId: nil,
-                             firmwareName: pkg?.officialVersion.map { _ in "Official firmware" } ?? sloop?.firmware ?? identity,
+                             firmwareName: pkg?.officialVersion.map { _ in "Official firmware" } ?? sloopName ?? identity,
                              version: pkg?.officialVersion, product: pkg?.product,
                              packageFile: pkg != nil ? "package.fwsc" : nil, packageSHA256: pkg?.sha256, packageSize: pkg?.bytes.count,
-                             packageExact: pkg?.product == identity,
+                             // beside a SLOOP archive the identity comes from the package itself, so it proves nothing
+                             packageExact: pkg?.product == identity && sloop == nil,
                              archiveFile: archive != nil ? "felucca-backup.json" : sloop != nil ? SloopArchive.fileName : nil,
                              archiveBytes: archive?.totalBytes ?? sloop?.totalBytes, archiveObjects: archive?.objects.count ?? sloop?.objects.count)
-            s.reportedName = sloop?.firmware
+            s.reportedName = sloopName
             s.id = id
             s.date = created
             found.append(s)

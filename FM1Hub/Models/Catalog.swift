@@ -114,6 +114,9 @@ struct Firmware: Codable, Identifiable, Hashable {
     var productDigits: Substring { product.split(separator: "_").last ?? "" }
     var searchText: String { [name, author, what, version, kinds.joined(separator: " "), product].joined(separator: " ").lowercased() }
 
+    /// The "ident" pattern of a firmware that says nothing about the identities it reports.
+    static let anyIdentity = "FM-1_\\d{3,8}"
+
     /// The firmware a device's own words name, among those sharing its identity. Only name and version together count:
     /// a firmware built on another can keep that one's name with its own base version ("SLOOP 2.4.1").
     static func named(_ reported: String?, among all: [Firmware]) -> Firmware? {

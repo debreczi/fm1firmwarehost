@@ -5,8 +5,8 @@ import XCTest
 /// that was on the device, so what can name one firmware among them is pinned down here.
 @MainActor
 final class SharedIdentityTests: XCTestCase {
-    private static func entry(_ id: String, _ name: String, _ version: String, _ product: String, sha: String = "", installs: Int = 0) -> String {
-        #"{"id":"\#(id)","name":"\#(name)","version":"\#(version)","pkg":"fw/\#(id).fwsc","product":"\#(product)","size":1,"sha256":"\#(sha)","installs":\#(installs)}"#
+    private static func entry(_ id: String, _ name: String, _ version: String, _ product: String, sha: String = "", installs: Int = 0, ident: String = #"FM-1_\\d{3,8}"#) -> String {
+        #"{"id":"\#(id)","name":"\#(name)","version":"\#(version)","pkg":"fw/\#(id).fwsc","product":"\#(product)","size":1,"sha256":"\#(sha)","installs":\#(installs),"ident":"\#(ident)"}"#
     }
 
     private func catalog(extra: [String] = []) -> CatalogStore {
@@ -45,6 +45,57 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertNil(catalog().whoIs("FM-1_900", named: nil)?.firmware)
     }
 
+    // MARK: A family range says as much as a package
+
+    private func withSkiff() -> CatalogStore {
+        catalog(extra: [
+            Self.entry("matryoshka", "Matryoshka", "1.0", "FM-1_714"),
+            Self.entry("skiff", "Skiff", "1.4", "FM-1_719", ident: #"FM-1_7(1[0-4]|2\\d)"#)
+        ])
+    }
+
+    func testAnIdentityInAnotherFirmwaresFamilyRangeIsAmbiguous() {
+        let c = withSkiff()
+        XCTAssertEqual(Set(c.firmwares(reporting: "FM-1_714").map(\.id)), ["matryoshka", "skiff"])
+        XCTAssertTrue(c.identityIsAmbiguous("FM-1_714"))
+        XCTAssertNil(c.whoIs("FM-1_714")?.firmware, "it may be either")
+        XCTAssertEqual(c.whoIs("FM-1_714", named: "Matryoshka 1.0")?.firmware?.id, "matryoshka")
+        XCTAssertNil(c.whoIs("FM-1_714", named: "Skiff 1.4")?.firmware, "the hub's Skiff 1.4 is another package than this identity")
+    }
+
+    func testAFamilyRangeAloneStillNamesItsFirmwareAsAnotherVersion() {
+        let w = withSkiff().whoIs("FM-1_720")
+        XCTAssertEqual(w?.firmware?.id, "skiff")
+        XCTAssertEqual(w?.exact, false)
+        XCTAssertFalse(withSkiff().identityIsAmbiguous("FM-1_720"))
+    }
+
+    func testTheCatchAllPatternNamesNothing() {
+        XCTAssertTrue(catalog().firmwares(reporting: "FM-1_555").isEmpty)
+        XCTAssertFalse(catalog().identityIsAmbiguous("FM-1_555"))
+    }
+
+    // MARK: Official-looking numbers, and no catalogue
+
+    func testAnOfficialLookingNumberACustomFirmwareUsesIsAmbiguous() {
+        let c = catalog(extra: [Self.entry("bubba", "Bubba", "1.0", "FM-1_003")])
+        XCTAssertTrue(c.identityIsAmbiguous("FM-1_003"))
+        XCTAssertNil(c.whoIs("FM-1_003")?.firmware)
+        XCTAssertEqual(c.whoIs("FM-1_003")?.exact, false)
+        XCTAssertEqual(c.whoIs("FM-1_003", named: "Bubba 1.0")?.firmware?.id, "bubba")
+        XCTAssertFalse(c.identityIsAmbiguous("FM-1_016"), "no custom firmware uses this one")
+        XCTAssertEqual(c.whoIs("FM-1_016")?.exact, true)
+        XCTAssertEqual(c.whoIs("FM-1_016")?.isStock, true)
+    }
+
+    func testWithoutACatalogueNoIdentityCanBeTrusted() {
+        let c = CatalogStore()
+        XCTAssertTrue(c.apply(Data(#"{"firmwares":[]}"#.utf8)))
+        XCTAssertTrue(c.identityIsAmbiguous("FM-1_900"))
+        XCTAssertTrue(c.identityIsAmbiguous("FM-1_918"))
+        XCTAssertFalse(c.identityIsAmbiguous("FM-1_016"), "M-VAVE's own numbers need no catalogue")
+    }
+
     func testAFirmwareCanNotBeNamedOutsideTheIdentityItReports() {
         XCTAssertNil(catalog().whoIs("FM-1_900", named: "Felucca 1.8.0")?.firmware)
     }
@@ -67,6 +118,37 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertEqual(Firmware.likeliestFirst(all, reported: nil, lastInstalled: nil).map(\.id), ["hortator", "hortator-bt", "sloop"], "the most installed first")
         XCTAssertEqual(Firmware.likeliestFirst(all, reported: nil, lastInstalled: "hortator-bt").first?.id, "hortator-bt")
         XCTAssertEqual(Firmware.likeliestFirst(all, reported: "SLOOP 2.4.1", lastInstalled: "hortator-bt").first?.id, "sloop", "what it calls itself counts for more")
+    }
+
+    // MARK: What the screens claim
+
+    func testOnlyTheFirmwareTheDeviceNamedIsShownAsRunning() throws {
+        let c = catalog()
+        try withController(c) { device, _ in
+            let sloop = try XCTUnwrap(c.firmware(id: "sloop"))
+            XCTAssertFalse(device.isRunning(sloop), "nothing is connected")
+        }
+    }
+
+    func testAPackageIsUnconfirmedUnlessTheDeviceNamedIt() {
+        let c = catalog()
+        var s = aBackup(identity: "FM-1_900")
+        XCTAssertFalse(c.packageIsUnconfirmed(in: s), "there is no package yet")
+        s.packageFile = "package.fwsc"
+        s.packageExact = true
+        XCTAssertTrue(c.packageIsUnconfirmed(in: s), "a record from before these fields, or a guess, is not to be believed")
+        s.packageConfirmed = true
+        XCTAssertFalse(c.packageIsUnconfirmed(in: s))
+
+        var own = aBackup(identity: "FM-1_918", name: "Felucca")
+        own.packageFile = "package.fwsc"
+        own.packageExact = true
+        XCTAssertFalse(c.packageIsUnconfirmed(in: own))
+        own.packageExact = false
+        own.version = "1.8.0"
+        XCTAssertFalse(c.packageIsUnconfirmed(in: own), "the hub's other version of a firmware it does know")
+        own.version = nil
+        XCTAssertTrue(c.packageIsUnconfirmed(in: own), "found by its number alone")
     }
 
     // MARK: What a package file says
@@ -108,6 +190,36 @@ final class SharedIdentityTests: XCTestCase {
             XCTAssertNil(saved.packageConfirmed)
             XCTAssertNil(saved.firmwareId)
             XCTAssertNotEqual(saved.firmwareName, "Hortator", "not the first with that identity")
+        }
+    }
+
+    func testThePackageReplacesTheAppsNoteButNotTheUsers() throws {
+        let data = FWSCPackageTests.makePackage(product: "FM-1_900", payload: 1024)
+        let other = FWSCPackageTests.makePackage(product: "FM-1_900", payload: 2048)
+        try withController(catalog()) { device, library in
+            var s = aBackup(identity: "FM-1_900")
+            s.notes = "the app's word on why there is no package"
+            library.add(s)
+            try attach(data, to: s, device: device)
+            XCTAssertEqual(library.snapshots.first?.notes, "", "there is a package now")
+
+            var saved = try XCTUnwrap(library.snapshots.first)
+            saved.notes = "my own note"
+            library.update(saved)
+            try attach(other, to: saved, device: device)
+            XCTAssertEqual(library.snapshots.first?.notes, "my own note", "choosing another keeps what the user wrote")
+        }
+    }
+
+    func testABackupRecoveredWithoutAnIdentityTakesAnyPackage() throws {
+        let data = FWSCPackageTests.makePackage(product: "FM-1_900", payload: 1024)
+        try withController(catalog()) { device, library in
+            let s = aBackup(identity: "SLOOP 2.8.4", name: "SLOOP 2.8.4")
+            library.add(s)
+            try attach(data, to: s, device: device)
+            let saved = try XCTUnwrap(library.snapshots.first)
+            XCTAssertTrue(saved.hasPackage)
+            XCTAssertFalse(saved.packageExact)
         }
     }
 

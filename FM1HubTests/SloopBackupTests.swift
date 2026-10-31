@@ -5,11 +5,13 @@ import XCTest
 /// hold the app to the frames, the order and the answers of that document.
 private final class FakeSloop: EditorLink {
     var objects: [Int: [UInt8]]
-    var said = "SLOOP 2.8.4"
+    var said = "FELUCCA SLOOP 2.8.4"    // editor.c: ed_str("FELUCCA " FELUCCA_VERSION, 24)
     var params: UInt8 = 71
     var proto: UInt8? = 11
     var playing = false             // commits of projects, banks and settings answer rc 3
     var refused: Set<Int> = []      // a firmware older than these objects answers their begin with 5
+    var sampleFails: (cmd: UInt8, rc: UInt8)?
+    var commitFails: UInt8?         // what a commit answers, with a late reply to its data request arriving first
     private(set) var writes: [String] = []
     private(set) var listed = 0
     private var staged: (id: Int, len: Int, crc: UInt32, bytes: [UInt8])?
@@ -25,7 +27,20 @@ private final class FakeSloop: EditorLink {
         return try SevenBit.blockUnpack(a, size: a.count - groups)
     }
 
-    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int) async throws -> [UInt8] {
+    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int, accepts: ([UInt8]) -> Bool) async throws -> [UInt8] {
+        if cmd == 36, args[0] == 2, let rc = commitFails {
+            let late: [UInt8] = [1, args[1], 0]
+            return accepts(late) ? late : [2, args[1], rc]
+        }
+        if let f = sampleFails, f.cmd == cmd {
+            return cmd == 12 ? Array(args[0...3]) + [f.rc] : [args[0], f.rc]
+        }
+        let reply = try answer(cmd, args)
+        XCTAssertTrue(accepts(reply), "the app must take the device's own reply to command \(cmd) for its own")
+        return reply
+    }
+
+    private func answer(_ cmd: UInt8, _ args: [UInt8]) throws -> [UInt8] {
         switch cmd {
         case 1:
             var a = Array(said.utf8)
@@ -55,32 +70,32 @@ private final class FakeSloop: EditorLink {
             return reply
         case 36:
             let op = args[0], id = Int(args[1])
-            func answer(_ rc: UInt8) -> [UInt8] { [op, args[1], rc] }
+            func put(_ rc: UInt8) -> [UInt8] { [op, args[1], rc] }
             switch op {
             case 0:
-                if refused.contains(id) { return answer(5) }
+                if refused.contains(id) { return put(5) }
                 staged = (id, try u(args, 2), UInt32(try u(args, 7)), [])
                 writes.append("begin \(id)")
-                return answer(0)
+                return put(0)
             case 1:
-                guard var s = staged, s.id == id, try u(args, 2) == s.bytes.count else { return answer(5) }
+                guard var s = staged, s.id == id, try u(args, 2) == s.bytes.count else { return put(5) }
                 s.bytes += try unpack(args[7...])
                 staged = s
-                return answer(s.bytes.count <= 256 * 4096 ? 0 : 1)
+                return put(s.bytes.count <= 256 * 4096 ? 0 : 1)
             case 2:
-                guard let s = staged, s.id == id else { return answer(5) }
-                if playing { return answer(3) }
-                guard s.bytes.count == s.len, SevenBit.crc32(s.bytes) == s.crc else { return answer(2) }
+                guard let s = staged, s.id == id else { return put(5) }
+                if playing { return put(3) }
+                guard s.bytes.count == s.len, SevenBit.crc32(s.bytes) == s.crc else { return put(2) }
                 objects[id] = s.bytes
                 staged = nil
                 writes.append("commit \(id)")
-                return answer(0)
+                return put(0)
             case 3:
                 staged = nil
                 writes.append("abort \(id)")
-                return answer(0)
+                return put(0)
             default:
-                return answer(1)
+                return put(1)
             }
         case 11:
             sample = (Int(args[0]), [UInt8](repeating: 0, count: 512))
@@ -134,7 +149,7 @@ final class SloopBackupTests: XCTestCase {
         ])
     }
 
-    private static let sloop = EditorInfo(version: "SLOOP 2.8.4", paramCount: 71, protocolVersion: 11)
+    private static let sloop = EditorInfo(version: "FELUCCA SLOOP 2.8.4", paramCount: 71, protocolVersion: 11)
 
     private func capture(_ device: FakeSloop) async throws -> SloopArchive {
         try await SloopBackup.capture(device, info: Self.sloop) { _, _ in }
@@ -150,8 +165,17 @@ final class SloopBackupTests: XCTestCase {
         let said = await SloopBackup.info(Self.aDevice())
         let info = try XCTUnwrap(said)
         XCTAssertEqual(info, Self.sloop)
+        XCTAssertEqual(info.name, "SLOOP 2.8.4")
         XCTAssertTrue(info.hasBackup)
         XCTAssertEqual(info.newestProjectFormat, 6)
+    }
+
+    func testAFirmwaresOwnNameIsWhatFollowsFeluccas() {
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA SLOOP 2.8.4"), "SLOOP 2.8.4")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA CLIPPER 1.3"), "CLIPPER 1.3")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA 1.8.0"), "FELUCCA 1.8.0", "Felucca itself")
+        XCTAssertEqual(EditorInfo.ownName(of: "DRUM-DEV"), "DRUM-DEV")
+        XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA "), "FELUCCA ")
     }
 
     func testFirmwareBeforeTheProtocolVersionByteHasNoBackup() async {
@@ -206,7 +230,7 @@ final class SloopBackupTests: XCTestCase {
             XCTAssertEqual(o.bytes, device.objects[o.id], "object \(o.id)")
             XCTAssertEqual(o.len, device.objects[o.id]?.count)
         }
-        XCTAssertEqual(archive.firmware, "SLOOP 2.8.4", "the editor reads the firmware's version from here")
+        XCTAssertEqual(archive.firmware, "FELUCCA SLOOP 2.8.4", "the editor reads the firmware's version from here")
     }
 
     func testTheFileIsTheEditorsOwnFormat() async throws {
@@ -250,6 +274,26 @@ final class SloopBackupTests: XCTestCase {
                        "the samples come last, an empty slot is erased")
     }
 
+    func testObjectsOnlyAFirmwareOfTheFamilyHasAreKeptAndGoBackWithTheBanks() async throws {
+        let clipper = Self.aDevice()
+        clipper.objects[12] = Self.bytes(100, seed: 12)
+        clipper.objects[100] = Self.bytes(20, seed: 100)
+        let archive = try await capture(clipper)
+        XCTAssertEqual(archive.objects.first { $0.id == 12 }?.len, 100, "a backup does not fail on an object the app has not heard of")
+
+        let same = Self.aDevice()
+        try await restore(archive, to: same)
+        XCTAssertEqual(same.objects[12], clipper.objects[12])
+        XCTAssertEqual(same.objects[100], clipper.objects[100])
+        let commits = same.writes.filter { $0.hasPrefix("commit") }
+        XCTAssertEqual(commits, [6, 7, 8, 9, 10, 11, 12, 100, 2, 3, 4, 5, 0, 1].map { "commit \($0)" })
+
+        let other = Self.aDevice()
+        other.refused = [12, 100]
+        try await restore(archive, to: other)
+        XCTAssertTrue(other.writes.contains("commit 1"), "a firmware without them still gets the rest")
+    }
+
     func testObjectsAnOlderFirmwareLacksAreSkipped() async throws {
         let archive = try await capture(Self.aDevice())
         let older = Self.aDevice()
@@ -281,6 +325,43 @@ final class SloopBackupTests: XCTestCase {
         } catch {
             XCTAssertEqual(error.localizedDescription, "Stop playback first")
             XCTAssertEqual(device.writes, ["begin 6", "abort 6"], "nothing further is written")
+        }
+    }
+
+    func testALateReplyIsNotTakenForTheCommit() async throws {
+        let archive = try await capture(Self.aDevice())
+        let device = Self.aDevice()
+        device.commitFails = 2
+        do {
+            try await restore(archive, to: device)
+            XCTFail("the commit answered 2: a late reply to the data request must not read as its success")
+        } catch {
+            XCTAssertTrue(device.writes.contains("abort 6"))
+        }
+    }
+
+    func testALateBackupReplyIsLeftForTheOneItBelongsTo() async throws {
+        let device = Self.aDevice()
+        let late = LateReplies(device: device)
+        let archive = try await SloopBackup.capture(late, info: Self.sloop) { _, _ in }
+        XCTAssertEqual(archive.objects.first { $0.id == 6 }?.bytes, device.objects[6])
+        XCTAssertGreaterThan(late.ignored, 0, "the test did offer it replies to earlier requests")
+    }
+
+    func testASampleFailureSaysWhatItIs() async throws {
+        let archive = try await capture(Self.aDevice())
+        for (cmd, rc, words) in [(UInt8(12), UInt8(3), "could not be written"), (12, 2, "could not be erased"), (12, 4, "was not open"),
+                                 (13, 3, "failed its data check"), (13, 4, "could not be written"), (13, 5, "not a valid sample"), (11, 1, "could not be erased")] {
+            let device = Self.aDevice()
+            device.sampleFails = (cmd, rc)
+            do {
+                try await restore(archive, to: device)
+                XCTFail("command \(cmd) answered \(rc)")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("USR1"), error.localizedDescription)
+                XCTAssertTrue(error.localizedDescription.contains(words), error.localizedDescription)
+                XCTAssertFalse(error.localizedDescription.contains("Stop playback"))
+            }
         }
     }
 
@@ -353,7 +434,7 @@ final class SloopBackupTests: XCTestCase {
             a.objects[0] = SloopArchiveObject(id: o.id, len: o.len + 1, crc: o.crc, data: o.data)
         }
         try await refusesBeforeWriting { a in
-            a.objects.append(SloopArchiveObject(id: 12, len: 0, crc: 0, data: ""))
+            a.objects.append(SloopArchiveObject(id: 200, len: 0, crc: 0, data: ""))
         }
         try await refusesBeforeWriting { a in
             let short = [UInt8](repeating: 1, count: 100)
@@ -376,6 +457,22 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertEqual(SloopBackup.projectFormat(Self.project(format: 6)), 6)
         XCTAssertEqual(SloopBackup.projectFormat([1, 2, 3, 4]), 0)
         XCTAssertEqual(SloopBackup.projectFormat([]), 0)
+    }
+}
+
+/// Offers each backup read the reply to the read before it first, as a late reply after a retry would be.
+private final class LateReplies: EditorLink {
+    let device: FakeSloop
+    private(set) var ignored = 0
+    private var previous: [UInt8]?
+
+    init(device: FakeSloop) { self.device = device }
+
+    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval, retries: Int, accepts: ([UInt8]) -> Bool) async throws -> [UInt8] {
+        if cmd == 35, let old = previous, !accepts(old) { ignored += 1 }
+        let reply = try await device.request(cmd, args, timeout: timeout, retries: retries, accepts: accepts)
+        if cmd == 35 { previous = reply }
+        return reply
     }
 }
 

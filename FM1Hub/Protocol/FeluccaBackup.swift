@@ -48,8 +48,9 @@ final class FeluccaLink {
     let link: MIDILink
     init(link: MIDILink) { self.link = link }
 
-    /// Sends one frame and waits for the reply to the same command. `retries` resends on a timeout.
-    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval = 1.2, retries: Int = 0) async throws -> [UInt8] {
+    /// Sends one frame and waits for the reply to the same command that `accepts` takes for its own: a retry can leave a
+    /// late reply to an earlier request behind. `retries` resends on a timeout.
+    func request(_ cmd: UInt8, _ args: [UInt8], timeout: TimeInterval = 1.2, retries: Int = 0, accepts: ([UInt8]) -> Bool = { _ in true }) async throws -> [UInt8] {
         for b in args where b > 0x7F { throw FM1Error.protocolError("Bad data byte \(b)") }
         var attempt = 0
         while true {
@@ -61,7 +62,10 @@ final class FeluccaLink {
             while Date() < end {
                 guard let d = await link.read(timeout: end.timeIntervalSinceNow) else { break }
                 guard d.count >= 6, d[0] == 0xF0, d[1] == 0x7D, d[2] == 0x46, d[3] == 0x4C, d.last == 0xF7 else { continue }
-                if d[4] == cmd { return Array(d[5..<(d.count - 1)]) }
+                if d[4] == cmd {
+                    let reply = Array(d[5..<(d.count - 1)])
+                    if accepts(reply) { return reply }
+                }
             }
             if link.lost { throw FM1Error.lost("The FM-1 was disconnected.") }
             attempt += 1
