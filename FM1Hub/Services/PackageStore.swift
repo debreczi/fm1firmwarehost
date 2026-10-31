@@ -151,11 +151,15 @@ final class PackageStore {
                 for a in fw { assets.append((r.tag_name, a)) }
             }
             var ofThatVersion: [FWSCPackage] = []
+            var sawAll = assets.count <= 8
             for (tag, a) in assets.prefix(8) {
                 guard let url = URL(string: a.browser_download_url) else { continue }
                 onStatus("Trying \(f.name) \(tag): \(a.name)…")
                 guard let data = try? await download(url, expectedSize: a.size, exactSize: a.size, onProgress: nil),
-                      let p = try? FWSCPackage(data: data) else { continue }
+                      let p = try? FWSCPackage(data: data) else {
+                    sawAll = false   // a build not seen may be another of that version
+                    continue
+                }
                 if p.product == product {
                     if version != nil {
                         ofThatVersion.append(p)
@@ -165,7 +169,7 @@ final class PackageStore {
                     return p
                 }
             }
-            if let p = PackageStore.theOnlyBuild(of: ofThatVersion) {
+            if sawAll, let p = PackageStore.theOnlyBuild(of: ofThatVersion) {
                 try? keep(p)
                 return p
             }

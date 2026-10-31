@@ -128,6 +128,19 @@ final class LibraryStoreTests: XCTestCase {
         }
     }
 
+    func testARecoveredSloopBackupKeepsTheIdentityItsFileCarries() throws {
+        try withCleanLibrary {
+            let dir = folder.appendingPathComponent("Snapshots/\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: "FELUCCA SLOOP 2.8.4", date: "2026-10-31T08:00:00Z", objects: [], identity: "FM-1_900")
+            try JSONEncoder().encode(archive).write(to: dir.appendingPathComponent(SloopArchive.fileName))
+
+            let found = try XCTUnwrap(LibraryStore(folder: folder).snapshots.first)
+            XCTAssertEqual(found.identity, "FM-1_900")
+            XCTAssertEqual(found.firmwareName, "SLOOP 2.8.4")
+        }
+    }
+
     func testAPackageBesideASloopArchiveIsNotTakenForExact() throws {
         try withCleanLibrary {
             let dir = folder.appendingPathComponent("Snapshots/\(UUID().uuidString)", isDirectory: true)

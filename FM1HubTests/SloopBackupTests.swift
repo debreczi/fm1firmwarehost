@@ -196,6 +196,8 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertFalse(EditorInfo.isSloop("FELUCCA sloopDX 4.0 BETA"))
         XCTAssertFalse(EditorInfo.isSloop("FELUCCA CLIPPER 1.3"))
         XCTAssertFalse(EditorInfo.isSloop("FELUCCA 2.4 BETA"), "SLOOP Floyd FM's release build")
+        XCTAssertFalse(EditorInfo.isSloop("FELUCCA SLOOP Deluxe 1.0"), "a firmware that kept the word in its name")
+        XCTAssertFalse(EditorInfo.isSloop("FELUCCA SLOOP"))
     }
 
     func testABackupKnowsWhetherTheAppCanWriteItsMusicBack() {
@@ -275,6 +277,17 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertEqual(json["version"] as? Int, 1)
         let first = try XCTUnwrap((json["objects"] as? [[String: Any]])?.first)
         XCTAssertEqual(Set(first.keys), ["id", "len", "crc", "data"])
+    }
+
+    func testTheIdentityTravelsWithTheFileWithoutChangingItsFormat() async throws {
+        let archive = try await SloopBackup.capture(Self.aDevice(), info: Self.sloop, identity: "FM-1_900") { _, _ in }
+        XCTAssertEqual(archive.identity, "FM-1_900")
+        let back = try JSONDecoder().decode(SloopArchive.self, from: try JSONEncoder().encode(archive))
+        XCTAssertEqual(back.identity, "FM-1_900")
+
+        // what the SLOOP web editor writes has none
+        let fromTheEditor = #"{"format":"sloop-backup","version":1,"firmware":"FELUCCA SLOOP 2.8.4","date":"2026-10-31T08:00:00.000Z","objects":[]}"#
+        XCTAssertNil(try JSONDecoder().decode(SloopArchive.self, from: Data(fromTheEditor.utf8)).identity)
     }
 
     func testTheProgressReachesTheTotal() async throws {

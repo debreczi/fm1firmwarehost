@@ -31,6 +31,7 @@ struct SloopArchive: Codable {
     var firmware: String
     var date: String
     var objects: [SloopArchiveObject]
+    var identity: String? = nil     // what the FM-1 reported: the editor reads no such key, and a lost index needs it
 
     var totalBytes: Int { objects.reduce(0) { $0 + $1.len } }
 }
@@ -57,8 +58,11 @@ struct EditorInfo: Equatable {
     }
     var name: String { EditorInfo.ownName(of: version) }
 
-    /// SLOOP itself, not a firmware built on it that renamed itself.
-    static func isSloop(_ version: String) -> Bool { ownName(of: version).hasPrefix("SLOOP ") }
+    /// SLOOP itself, not a firmware built on it that kept the word in its name: "SLOOP 2.8.4", not "SLOOP Deluxe 1.0".
+    static func isSloop(_ version: String) -> Bool {
+        let prefix = "SLOOP ", name = ownName(of: version)
+        return name.hasPrefix(prefix) && name.dropFirst(prefix.count).first?.isNumber == true
+    }
     var isSloop: Bool { EditorInfo.isSloop(version) }
 
     /// The firmware sends at most 24 characters here, so one that long may be cut in the middle of its version:
@@ -166,7 +170,7 @@ enum SloopBackup {
     }
 
     /// Reads everything the firmware lists.
-    static func capture(_ fl: some EditorLink, info: EditorInfo, onProgress: @escaping (Int, Int) -> Void) async throws -> SloopArchive {
+    static func capture(_ fl: some EditorLink, info: EditorInfo, identity: String? = nil, onProgress: @escaping (Int, Int) -> Void) async throws -> SloopArchive {
         let man = try manifest(try await fl.request(Cmd.list, [], timeout: 5.0, retries: 0))
         let total = man.reduce(0) { $0 + $1.len }
         var done = 0
@@ -196,7 +200,7 @@ enum SloopBackup {
         // Not validated here: the editor keeps whatever the firmware lists, and refusing an object only a later firmware
         // has would cost the user the backup and, with the automatic backup on, the install. The CRCs were checked above.
         return SloopArchive(format: SloopArchive.formatName, version: 1, firmware: info.version,
-                            date: ISO8601DateFormatter().string(from: Date()), objects: objects)
+                            date: ISO8601DateFormatter().string(from: Date()), objects: objects, identity: identity)
     }
 
     /// Every byte checked before the first destructive request. Returns the objects' bytes by id.

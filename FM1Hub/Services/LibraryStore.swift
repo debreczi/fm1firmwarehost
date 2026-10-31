@@ -235,9 +235,9 @@ final class LibraryStore {
             let pkg = (try? Data(contentsOf: pkgURL)).flatMap { try? FWSCPackage(data: $0) }
             let archive = (try? Data(contentsOf: arcURL)).flatMap { try? JSONDecoder().decode(FeluccaArchive.self, from: $0) }
             let sloop = (try? Data(contentsOf: sloopURL)).flatMap { try? JSONDecoder().decode(SloopArchive.self, from: $0) }
-            // a SLOOP archive names the firmware ("SLOOP 2.8.4"), not its identity
+            // a SLOOP archive's firmware is its name ("SLOOP 2.8.4"), not its identity, and one from another editor has none
             let sloopName = sloop.map { EditorInfo.ownName(of: $0.firmware) }
-            guard let identity = archive?.firmware ?? pkg?.product ?? sloopName else { continue }   // an empty folder holds nothing to restore
+            guard let identity = archive?.firmware ?? sloop?.identity ?? pkg?.product ?? sloopName else { continue }   // an empty folder holds nothing to restore
             let created = archive.flatMap { ISO8601DateFormatter().date(from: $0.created) }
                 ?? sloop.flatMap { ISO8601DateFormatter().date(from: $0.date) }
                 ?? (try? dir.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()

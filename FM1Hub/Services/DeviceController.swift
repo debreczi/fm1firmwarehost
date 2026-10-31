@@ -396,6 +396,7 @@ final class DeviceController {
             // whatever this leaves on the FM-1, it is no longer known to be what answered before
             reportedName = nil
             musicBackupSupported = nil
+            musicWritesBack = true
             token = try library.beginAttempt(PendingUpdate(product: pkg.product, sha256: pkg.sha256, firmwareId: firmwareId,
                                                            name: name, version: version, usesStockLoader: stockLoader,
                                                            source: source, identityBefore: found.text))
@@ -588,7 +589,8 @@ final class DeviceController {
             dev.link.close()
             library.add(s)
             j.title = s.name
-            let pkgText = s.hasPackage ? "its firmware package" : catalog.identityIsAmbiguous(s.identity) ? "no firmware package yet (choose yours in the backup)" : "no firmware package (see the backup for why)"
+            let pkgText = s.hasPackage && (catalog.packageIsUnconfirmed(in: s) || !s.packageExact) ? "a firmware package that may not be what was on it (see the backup)"
+                : s.hasPackage ? "its firmware package" : catalog.identityIsAmbiguous(s.identity) ? "no firmware package yet (choose yours in the backup)" : "no firmware package (see the backup for why)"
             let musicText = s.hasArchive
                 ? "and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))" + (s.musicRestoresInApp ? "" : ", which the app can't put back on this firmware")
                 : "but no music archive: this firmware has no backup over USB that the app knows"
@@ -632,9 +634,10 @@ final class DeviceController {
             s.archiveBytes = archive.totalBytes
             s.archiveObjects = archive.objects.count
             musicBackupSupported = true
+            musicWritesBack = true
         } else if music.kind == .sloop, let info = music.info {
             phase = .backingUp(0, 1)
-            let archive = try await SloopBackup.capture(fl, info: info) { d, t in Task { @MainActor in self.phase = .backingUp(d, t) } }
+            let archive = try await SloopBackup.capture(fl, info: info, identity: dev.identity.text) { d, t in Task { @MainActor in self.phase = .backingUp(d, t) } }
             let enc = JSONEncoder()
             enc.outputFormatting = [.sortedKeys]
             let data = try enc.encode(archive)
@@ -676,7 +679,7 @@ final class DeviceController {
                 ?? "Several firmwares can report \(dev.identity.text), and this one did not say which it is. Choose yours and this backup becomes restorable."
             append("\(dev.identity.text) is ambiguous: no package chosen")
         } else {
-            s.packageNote = "No package found for \(dev.identity.text): not on the hub, not on this phone, not among the makers' GitHub releases. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
+            s.packageNote = "No package found for \(dev.identity.text) on the hub, on this phone or among the makers' GitHub releases, or they could not be reached. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
             append("no package found for \(dev.identity.text)")
         }
         finished = true
