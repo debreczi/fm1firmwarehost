@@ -138,6 +138,7 @@ final class DeviceController {
         if midiPorts.isEmpty, !isBusy {
             identity = nil
             feluccaBackupSupported = nil
+            loaderWaiting = nil          // unplugged: the Resume card must not keep claiming a loader is waiting
             statusMessage = "No MIDI device."
         }
     }
@@ -176,14 +177,19 @@ final class DeviceController {
                 statusMessage = ""
                 append("identity \(dev.identity.text) on \(dev.portName)")
                 feluccaBackupSupported = nil
+                reconcilePending(dev.identity)
                 if !dev.identity.isLoader { await probeFeluccaSupport() }
             } else {
                 identity = nil
                 feluccaBackupSupported = nil
+                loaderWaiting = nil          // nothing answered: there is no loader to show a Resume card for
                 otherPorts = up.others()
                 statusMessage = "No FM-1 found" + up.seen() + ". Plug it in by USB, close other MIDI apps, try again."
                 append("no FM-1" + up.seen())
             }
+            // Connect is the one thing the user does again and again, so it is where a library write that did not
+            // land gets another go: nothing else on this path writes it.
+            library.flush()
             refreshPorts()
             phase = .idle
         }
@@ -219,7 +225,8 @@ final class DeviceController {
             try await autoSnapshotIfWanted()
             phase = .downloading(0)
             let pkg = try await packages.package(for: f) { p in Task { @MainActor in self.phase = .downloading(p) } }
-            let after = try await flash(pkg, product: f.product, stockLoader: f.usesStockLoader)
+            let after = try await flash(pkg, product: f.product, stockLoader: f.usesStockLoader,
+                                        name: f.name, version: f.version, firmwareId: f.id, source: .hub)
             library.add(InstallRecord(firmwareId: f.id, name: f.name, version: f.version, product: f.product, sha256: f.sha256,
                                       identityBefore: before, identityAfter: after, source: .hub, success: true))
             j.message = "\(f.name) \(f.version) is on your FM-1."
@@ -255,7 +262,8 @@ final class DeviceController {
             }
             product = pkg.product
             j.title = "Official firmware \(pkg.officialVersion ?? pkg.product)"
-            let after = try await flash(pkg, product: pkg.product, stockLoader: true)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: true,
+                                        name: "Official firmware", version: pkg.officialVersion ?? "", firmwareId: nil, source: .stock)
             library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: pkg.officialVersion ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .stock, success: true))
             j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
@@ -277,14 +285,15 @@ final class DeviceController {
             let data = try Data(contentsOf: url)
             let pkg = try FWSCPackage(data: data)
             guard pkg.product.hasPrefix("FM-1_") else { throw FM1Error.package("The file is for \(pkg.product), not for an FM-1.") }
-            packages.keep(pkg)
+            try? packages.keep(pkg)
             let who = catalog.whoIs(pkg.product)
             let known = catalog.firmwares.first { $0.sha256 == pkg.sha256 }
             j.title = known?.name ?? who?.name ?? pkg.product
             j.subtitle = known.map { "\($0.version) · \(url.lastPathComponent)" } ?? url.lastPathComponent
             if let k = known { j.colour = Look.colour(for: k.id); j.imageURL = k.imageURL }
             try await autoSnapshotIfWanted()
-            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || known?.usesStockLoader == true)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || known?.usesStockLoader == true,
+                                        name: j.title, version: known?.version ?? "", firmwareId: known?.id, source: .file)
             library.add(InstallRecord(firmwareId: known?.id, name: j.title, version: known?.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .file, success: true))
             j.message = "\(j.title) is on your FM-1."
@@ -295,51 +304,143 @@ final class DeviceController {
         }
     }
 
-    /// The device is in update mode (an interrupted update): write the last package again, from the loader.
+    /// The device is in update mode (an interrupted update): write the package that was being written again — that
+    /// very one, resolved by its SHA-256, never whatever was installed successfully last.
     func resume() {
-        guard !isBusy, let last = library.lastInstalled else { return }
-        let f = last.firmwareId.flatMap { catalog.firmware(id: $0) }
-        var j = DeviceJob(kind: .resume, title: "Resume: \(last.name)", subtitle: last.version, colour: f.map { Look.colour(for: $0.id) } ?? Color(hex: "#9aa4b2"), imageURL: f?.imageURL)
+        guard !isBusy, let pending = library.pending else { return }
+        let f = pending.firmwareId.flatMap { catalog.firmware(id: $0) }
+        var j = DeviceJob(kind: .resume, title: "Resume: \(pending.name)", subtitle: pending.version, colour: f.map { Look.colour(for: $0.id) } ?? Color(hex: "#9aa4b2"), imageURL: f?.imageURL)
         start(job: j) { [self] in
             phase = .downloading(0)
-            let pkg: FWSCPackage
-            if let f = f { pkg = try await packages.package(for: f) }
-            else if let p = packages.localPackage(product: last.product) { pkg = p }
-            else if last.product == FWSCPackage.stockV15Product { pkg = try await packages.stockPackage(catalog.stock) }
-            else { throw FM1Error.package("The last package (\(last.product)) is not on this phone any more.") }
+            let pkg = try await pendingPackage(pending, firmware: f)
             let up = makeUpdater()
-            let stockProduct: String? = (pkg.isOfficial || f?.usesStockLoader == true) ? pkg.product : nil
-            let done = try await up.resume(image: pkg.logicalImage, stockProduct: stockProduct) { s in Task { @MainActor in self.phase = .installing(s) } }
-            guard done else { throw FM1Error.stopped("The loader stopped before the end. Replug and try again.") }
-            identity = FM1Identity.parse(text: pkg.product)
+            // The record already exists; this writes back the loader identity this attempt found, so that if the
+            // record was made without knowing what the device was running, a later Connect can still settle it.
+            let outcome = try await up.resume(image: pkg.logicalImage, expectedProduct: pending.product, stockLoader: pending.usesStockLoader,
+                                              beforeWriting: { [self] found in
+                                                  var p = pending
+                                                  p.identityBefore = found.text
+                                                  try library.refreshPending(p)
+                                              },
+                                              onStep: { s in Task { @MainActor in self.phase = .installing(s) } })
+            // the record stays on the list in both failure cases: it is still the half-written update
+            guard case .written(let after) = outcome else {
+                if outcome == .noLoader {
+                    loaderWaiting = nil
+                    throw FM1Error.notFound("The FM-1 is not in update mode any more: nothing was written. Press Connect to see what it is running.")
+                }
+                throw FM1Error.stopped("The loader stopped before the end. Replug and try again.")
+            }
+            forgetPending()
+            identity = FM1Identity.parse(text: after)
             identityDate = Date()
             loaderWaiting = nil
-            library.add(InstallRecord(firmwareId: f?.id, name: last.name, version: last.version, product: pkg.product, sha256: pkg.sha256,
-                                      identityBefore: "update loader", identityAfter: pkg.product, source: .resume, success: true))
-            j.message = "\(last.name) was written. If the FM-1 did not restart, power-cycle it."
+            feluccaBackupSupported = nil
+            // the id the record was made with, not whatever the catalogue happens to hold now
+            library.add(InstallRecord(firmwareId: pending.firmwareId, name: pending.name, version: pending.version, product: after, sha256: pkg.sha256,
+                                      identityBefore: "update loader", identityAfter: after, source: .resume, success: true))
+            j.message = "\(pending.name) was written and the FM-1 came back as \(after)."
             return j
         } onFailure: { _ in }
     }
 
-    /// Running firmware -> loader -> new firmware, or straight from a waiting loader. Returns the identity reported after.
-    private func flash(_ pkg: FWSCPackage, product: String, stockLoader: Bool) async throws -> String {
+    /// The pending update's package, by its exact hash: the hub's catalogue, this phone (the cache or an earlier
+    /// backup), or the hub's official V15. A file that does not hash to the record is not the pending package and
+    /// is never written.
+    private func pendingPackage(_ pending: PendingUpdate, firmware f: Firmware?) async throws -> FWSCPackage {
+        if let p = packages.localPackage(product: pending.product, sha256: pending.sha256) { return p }
+        if let f = f, f.sha256 == pending.sha256, let p = try? await packages.package(for: f), p.sha256 == pending.sha256 { return p }
+        if pending.product == FWSCPackage.stockV15Product, pending.sha256 == FWSCPackage.stockV15SHA256,
+           let p = try? await packages.stockPackage(catalog.stock), p.sha256 == pending.sha256 { return p }
+        throw FM1Error.package("The package that was being written (\(pending.name), \(pending.product)) is not on this phone any more. Install it again from the list: that continues from the loader too.")
+    }
+
+    /// Running firmware -> loader -> new firmware, or straight from a waiting loader. Returns the identity reported
+    /// after. What is about to be written is recorded before the loader is entered, so an interruption can be
+    /// resumed with this exact package; the record is cleared only once the device has reported the new identity.
+    private func flash(_ pkg: FWSCPackage, product: String, stockLoader: Bool,
+                       name: String, version: String, firmwareId: String?, source: InstallSource) async throws -> String {
         let up = makeUpdater()
         let image = pkg.logicalImage
-        packages.keep(pkg)
-        var after: String
-        if let ota = await up.loaderPresent() {
-            append("loader waiting: \(ota.text), resuming")
-            let done = try await up.resume(image: image, stockProduct: stockLoader ? product : nil) { s in Task { @MainActor in self.phase = .installing(s) } }
-            guard done else { throw FM1Error.stopped("The loader stopped before the end. Replug and press Install again.") }
-            after = product
-        } else {
-            after = try await up.install(image: image, product: product) { s in Task { @MainActor in self.phase = .installing(s) } }
+        try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
+        // The record is written by this hook, which the updater calls once it has found the device and checked its
+        // model and before it sends anything. So it exists before a single byte goes down, and it carries the
+        // identity this very attempt saw — not a remembered one — which is what lets a later Connect decide
+        // whether the update finished. A device that is refused never replaces an earlier record at all.
+        // The token the hook brings back is this job's own. Without it nothing is abandoned, so a job that fails
+        // before the hook ever runs cannot undo the recovery record of an earlier write that did go half-way.
+        var token: LibraryStore.AttemptToken?
+        let record: FM1Updater.BeforeWriting = { [self] found in
+            token = try library.beginAttempt(PendingUpdate(product: pkg.product, sha256: pkg.sha256, firmwareId: firmwareId,
+                                                           name: name, version: version, usesStockLoader: stockLoader,
+                                                           source: source, identityBefore: found.text))
         }
+        let after: String
+        do {
+            if let ota = await up.loaderPresent() {
+                append("loader waiting: \(ota.text), resuming")
+                switch try await up.resume(image: image, expectedProduct: product, stockLoader: stockLoader,
+                                           beforeWriting: record,
+                                           onStep: { s in Task { @MainActor in self.phase = .installing(s) } }) {
+                case .written(let reported):
+                    after = reported
+                case .noLoader:
+                    // the loader answered a moment ago and is gone: not a byte of this package was sent
+                    throw FM1Error.notFound("The update loader was there a moment ago and is gone now: nothing was written. Replug the USB cable and press Install again.")
+                case .interrupted:
+                    throw FM1Error.stopped("The loader stopped before the end. Replug and press Install again.")
+                }
+            } else {
+                after = try await up.install(image: image, product: product, beforeWriting: record,
+                                             onStep: { s in Task { @MainActor in self.phase = .installing(s) } })
+            }
+        } catch {
+            // A backstop: every failure before the hook leaves the list as it was already, so this only matters
+            // if the point of no return ever moves. The store knows what the attempt supplanted, which is why it
+            // and not this is asked to put it back.
+            if (error as? FM1Error)?.nothingWritten == true { putBack(token) }
+            throw error
+        }
+        forgetPending()
         identity = FM1Identity.parse(text: after)
         identityDate = Date()
         loaderWaiting = nil
         feluccaBackupSupported = nil
         return after
+    }
+
+    /// Whenever the app learns what the FM-1 is running: if that is what the pending update meant to put there, and
+    /// the device was running something else before the attempt, the update finished — whether this app was watching
+    /// or the news arrives now. An install interrupted in the post-write window (app killed, or the device back
+    /// later than the updater waited) is found here. A write that did not land is retried on the next Connect,
+    /// since nothing else in this path writes the library.
+    private func reconcilePending(_ id: FM1Identity) {
+        guard let p = library.pending, p.isFinished(by: id) else { return }
+        append("the FM-1 runs \(id.text), which is what was pending: nothing left to resume")
+        forgetPending()
+    }
+
+    /// The device has reported the new identity, so there is nothing left to resume. A record that cannot be struck
+    /// off is said out loud (the library card shows it) but never turns a finished install into a failed one; the
+    /// store keeps the cleared state, so the install record saved next carries it to the disk.
+    private func forgetPending() {
+        do {
+            try library.clearPending()
+        } catch {
+            append("warning: \(error.localizedDescription)")
+        }
+    }
+
+    /// This attempt provably never reached the device, so the update actually waiting in the loader is whatever was
+    /// on the list before it began. Said plainly either way: put back, or put back only in memory for now.
+    private func putBack(_ token: LibraryStore.AttemptToken?) {
+        do {
+            try library.abandonAttempt(token)
+            append("nothing was written: the update to resume is again \(library.pending?.name ?? "none")")
+        } catch {
+            append("nothing was written: the update to resume is again \(library.pending?.name ?? "none") in the "
+                   + "app, but it could not be written back yet (\(error.localizedDescription))")
+        }
     }
 
     private func start(job: DeviceJob, work: @MainActor @escaping () async throws -> DeviceJob, onFailure: @MainActor @escaping (Error) -> Void) {
@@ -513,7 +614,7 @@ final class DeviceController {
         do {
             let pkg = try FWSCPackage(data: try Data(contentsOf: url))
             guard pkg.product == s.identity else { return "That file is \(pkg.product); this backup needs \(s.identity)." }
-            packages.keep(pkg)
+            try? packages.keep(pkg)
             try storePackage(pkg, in: &s)
             library.update(s)
             return nil
@@ -532,7 +633,8 @@ final class DeviceController {
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
             try await autoSnapshotIfWanted()
             let fw = s.firmwareId.flatMap { catalog.firmware(id: $0) }
-            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true,
+                                        name: s.firmwareName, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: s.firmwareName, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .snapshot, success: true))
             j.message = "\(s.firmwareName) is back on your FM-1." + (s.hasArchive ? " Now restore the music archive from the same backup." : "")

@@ -115,9 +115,20 @@ their own editors and backup tools; the app says so instead of pretending.
 
 ## Licence
 
-GPL-3.0 (see `LICENSE` and `NOTICE.md`). The protocol code under `FM1Hub/Protocol/` is a Swift port of GPL-3.0-only
-code by Leo Kuroshita (@kurogedelic, Hügelton Instruments) from the hub's installer and the Felucca web editor. Each
-firmware in the catalogue has its own licence (shown on its card).
+This app is **GPL-3.0-only**. The full text is in [`LICENSE`](LICENSE).
+
+Copyright (C) 2026 Janos Debreczi.
+
+The protocol code under `FM1Hub/Protocol/` is a Swift port of GPL-3.0-only code by Leo Kuroshita
+(@kurogedelic, Hügelton Instruments) from the hub's installer and the Felucca web editor,
+Copyright (C) 2026 Leo Kuroshita, Hügelton Instruments. The rest of the app builds on it, so the whole
+work carries the same licence — that is why it is GPL-3.0 and not MIT.
+
+The complete corresponding source of every build, TestFlight ones included, is this repository:
+<https://github.com/debreczi/fm1firmwarehost>.
+
+Each firmware in the catalogue has its own licence (shown on its card); the catalogue and the firmwares
+are not part of this app's source. See also [`NOTICE.md`](NOTICE.md).
 
 Not affiliated with M-VAVE or with the hub. Flashing can leave a device needing a rescue; read the hub's
 [knowledge base](https://thefirmwarehub.com/kb/) first. Privacy: [PRIVACY.md](PRIVACY.md). Support: [SUPPORT.md](SUPPORT.md).
