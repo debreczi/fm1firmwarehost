@@ -213,6 +213,10 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertNil(dashed.whoIs("FM-1_900", named: "MC")?.firmware, "a fork saying only MC is not the hub's MC-1")
         XCTAssertNil(dashed.whoIs("FM-1_900", named: "Mini")?.firmware)
         XCTAssertEqual(dashed.whoIs("FM-1_900", named: "MC-1 1.2.0")?.exact, true)
+
+        // the hub can write the version with its v
+        let jiant = catalog(extra: [Self.entry("jiant", "JIANT FM", "V10.9-f46764d", "FM-1_909"), Self.entry("salt", "Salt", "1", "FM-1_909")])
+        XCTAssertEqual(jiant.whoIs("FM-1_909", named: "JIANT FM 10.9")?.exact, true)
     }
 
     func testAFirmwareWhoseNameWasCutIsTheOwnerOfItsNumberAsOnMain() {
@@ -282,6 +286,30 @@ final class SharedIdentityTests: XCTestCase {
             device.seedDemo()
             XCTAssertTrue(device.isRunning(try XCTUnwrap(c.firmware(id: "felucca"))), "an identity of its own can")
             XCTAssertFalse(device.isRunning(try XCTUnwrap(c.firmware(id: "golana"))))
+        }
+    }
+
+    func testWhatTheHubSaysNowDecidesAboutAnInstaller() {
+        var s = aBackup(identity: "FM-1_46001200", name: "FIZZ")
+        s.firmwareId = "fizz"
+        s.ownInstaller = "https://example.com/old"
+        let listed = catalog(extra: [Self.entry("fizz", "FIZZ", "1.0", "FM-1_46001200", install: "https://example.com/new")])
+        XCTAssertEqual(listed.ownInstaller(of: s), "https://example.com/new")
+        let packageIsEnoughNow = catalog(extra: [Self.entry("fizz", "FIZZ", "1.0", "FM-1_46001200")])
+        XCTAssertNil(packageIsEnoughNow.ownInstaller(of: s))
+        XCTAssertEqual(catalog().ownInstaller(of: s), "https://example.com/old", "the hub has dropped it: the backup still knows")
+    }
+
+    func testAPackageWithoutACatalogueIsNamedOnceThereIsOne() throws {
+        let data = FWSCPackageTests.makePackage(product: "FM-1_924", payload: 1024)
+        let none = CatalogStore()
+        XCTAssertTrue(none.apply(Data(#"{"firmwares":[]}"#.utf8)))
+        try withController(none) { device, library in
+            let s = aBackup(identity: "FM-1_924", name: "FM-1_924")
+            library.add(s)
+            try attach(data, to: s, device: device)
+            XCTAssertEqual(library.snapshots.first?.firmwareName, "FM-1_924", "not \"another firmware\" for good")
+            XCTAssertEqual(library.snapshots.first?.packageExact, false)
         }
     }
 

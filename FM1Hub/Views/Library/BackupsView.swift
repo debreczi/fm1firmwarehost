@@ -103,10 +103,6 @@ struct SnapshotDetailView: View {
     /// The firmwares this backup's identity may belong to.
     private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
     private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
-    /// The page that puts this backup's firmware back, when its package alone can't.
-    private var ownInstaller: String? {
-        snapshot.ownInstaller ?? snapshot.firmwareId.flatMap { catalog.firmware(id: $0) }.flatMap { $0.needsOwnInstaller ? $0.install : nil }
-    }
 
     private var musicFacts: String {
         guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
@@ -129,7 +125,7 @@ struct SnapshotDetailView: View {
                 }
 
                 VStack(spacing: 10) {
-                    if let page = ownInstaller {
+                    if let page = catalog.ownInstaller(of: snapshot) {
                         if let u = URL(string: page) {
                             Link(destination: u) { Label("Install with its own installer", systemImage: "arrow.up.right.square") }.buttonStyle(SecondaryButtonStyle())
                         }
@@ -215,7 +211,10 @@ struct SnapshotDetailView: View {
         }
         .alert("Rename", isPresented: $editing) {
             TextField("Name", text: $newName)
-            Button("Save") { snapshot.name = newName; library.update(snapshot) }
+            Button("Save") {
+                let name = newName.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty { snapshot.name = name; library.update(snapshot) }
+            }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(snapshot.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {

@@ -14,7 +14,7 @@ final class PackageStoreTests: XCTestCase {
         XCTAssertFalse(PackageStore.carries(version: "8.4", "v2.8.4"))
         XCTAssertFalse(PackageStore.carries(version: "2.8.3", "sloop-2.8.31.fwsc"))
         XCTAssertFalse(PackageStore.carries(version: "2.8.3", "2x8x3"), "a dot means a dot")
-        XCTAssertFalse(PackageStore.carries(version: "1", "sid1"), "part of a name")
+        XCTAssertTrue(PackageStore.carries(version: "1.0.9", "BEETLE-RC1.0.9.fwsc"))
     }
 
     func testAWholeNumberVersionMustBeTheWholeTag() {
@@ -23,6 +23,9 @@ final class PackageStoreTests: XCTestCase {
         XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.1", asset: "mnm1-1.0.1.fwsc"))
         XCTAssertTrue(PackageStore.isVersion("39", tag: "v39", asset: "quest.fwsc"))
         XCTAssertTrue(PackageStore.isVersion("39", tag: "V39", asset: "quest.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("39", tag: "quest-39", asset: "fm1-quest-39.fwsc"), "FM1 Quest's real tags")
+        XCTAssertFalse(PackageStore.isVersion("39", tag: "quest-139", asset: "q.fwsc"))
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "sid1", asset: "sid1.fwsc"), "part of a name")
         XCTAssertTrue(PackageStore.isVersion("2.8.3", tag: "other", asset: "sloop-2.8.3.fwsc"))
         XCTAssertTrue(PackageStore.isVersion("2.8.3", tag: "v2.8.3", asset: "sloop.fwsc"))
     }

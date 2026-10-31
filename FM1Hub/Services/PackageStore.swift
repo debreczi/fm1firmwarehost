@@ -116,16 +116,19 @@ final class PackageStore {
         let assets: [Asset]
     }
 
-    /// Does this release tag or file name carry exactly this version? 2.8 is not 2.8.4, and the 1 of sid1 is no version.
+    /// Does this release tag or file name carry exactly this version? 2.8 is not 2.8.4.
     static func carries(version: String, _ text: String) -> Bool {
-        let pattern = "(?<![0-9A-Za-z.])[vV]?" + NSRegularExpression.escapedPattern(for: version) + "(?![0-9]|\\.[0-9])"
+        let pattern = "(?<![0-9.])" + NSRegularExpression.escapedPattern(for: version) + "(?![0-9]|\\.[0-9])"
         return text.range(of: pattern, options: .regularExpression) != nil
     }
 
-    /// Is this file of that release this version? A whole number can be part of any name ("zen-1-1.2.fwsc"), so that
-    /// has to be the release's whole tag.
+    /// Is this file of that release this version? A whole number can be part of any name ("sid1-1.0.0.fwsc",
+    /// "zen-1-1.2.fwsc"), so it has to end the release's tag: "v39", "quest-39".
     static func isVersion(_ version: String, tag: String, asset: String) -> Bool {
-        if !version.contains(".") { return [version, "v" + version].contains(tag.lowercased()) }
+        if !version.contains(".") {
+            let pattern = "(?:^|[^0-9A-Za-z.])[vV]?" + NSRegularExpression.escapedPattern(for: version) + "$"
+            return tag.range(of: pattern, options: .regularExpression) != nil
+        }
         return carries(version: version, tag) || carries(version: version, asset)
     }
 

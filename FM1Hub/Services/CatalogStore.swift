@@ -94,6 +94,13 @@ final class CatalogStore {
         s.firmwareId == nil && identityIsAmbiguous(s.identity) ? "the firmware of backup “\(s.name)”" : s.firmwareName
     }
 
+    /// The page that puts a backup's firmware back, when its package alone can't. What the hub says now counts; what the
+    /// backup remembers is for when the hub has dropped the firmware or the catalogue is gone.
+    func ownInstaller(of s: Snapshot) -> String? {
+        guard let f = s.firmwareId.flatMap({ firmware(id: $0) }) else { return s.ownInstaller }
+        return f.needsOwnInstaller ? f.install : nil
+    }
+
     /// A backup whose package nothing ties to the firmware that was on the device.
     func packageIsUnconfirmed(in s: Snapshot) -> Bool {
         guard !Demo.isOn, s.hasPackage, s.packageConfirmed != true else { return false }

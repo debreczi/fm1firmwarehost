@@ -756,7 +756,8 @@ final class DeviceController {
         else if ambiguous {
             s.version = nil
             s.firmwareId = nil
-            if s.identity.hasPrefix("FM-1_") { s.firmwareName = catalog.whoIs(s.identity)?.name ?? s.identity }
+            // without a catalogue the identity itself, which is named once there is one
+            if s.identity.hasPrefix("FM-1_") { s.firmwareName = catalog.firmwares.isEmpty ? s.identity : catalog.whoIs(s.identity)?.name ?? s.identity }
         }
         else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
         s.packageNote = nil
@@ -808,8 +809,7 @@ final class DeviceController {
             let pkg = try FWSCPackage(data: try Data(contentsOf: url))
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
             let fw = s.firmwareId.flatMap { catalog.firmware(id: $0) }
-            // the backup's own record first: the hub may have dropped the firmware, or the catalogue may be gone
-            if s.ownInstaller != nil || fw?.needsOwnInstaller == true { throw FM1Error.package("\(s.firmwareName) is installed by its maker's own page: the package alone is not all of it.") }
+            if catalog.ownInstaller(of: s) != nil { throw FM1Error.package("\(s.firmwareName) is installed by its maker's own page: the package alone is not all of it.") }
             try await autoSnapshotIfWanted()
             let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true,
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)

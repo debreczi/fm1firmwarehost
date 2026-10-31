@@ -125,7 +125,8 @@ struct Firmware: Codable, Identifiable, Hashable {
         let hits = all.filter {
             if EditorInfo.plain("\($0.name) \($0.version)").lowercased() == said { return true }
             guard let version = $0.versionSaid(in: said) else { return false }
-            return EditorInfo.plain($0.version).lowercased().hasPrefix(version + "-")
+            // a version can start with its v here, with no space before it for `plain` to go by
+            return EditorInfo.plain(" " + $0.version).dropFirst().lowercased().hasPrefix(version + "-")
         }
         return hits.count == 1 ? hits[0] : nil
     }
