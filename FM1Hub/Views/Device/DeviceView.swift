@@ -78,7 +78,7 @@ struct DeviceView: View {
                 Spacer(minLength: 0)
             }
             if let s = device.musicBackupSupported, device.isConnected {
-                Label(s ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",
+                Label(s ? (device.musicWritesBack ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "Backup saves this firmware's music too, but the app can't put it back. Its own web editor may open the file.") : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",
                       systemImage: s ? "checkmark.seal" : "info.circle")
                     .font(.system(size: 12)).foregroundStyle(s ? Theme.ok : Theme.textDim)
             }

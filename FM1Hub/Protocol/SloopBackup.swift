@@ -3,12 +3,13 @@
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments.
 //
 // Complete musical archives of SLOOP and the firmwares built on it: the working project, the settings, the song
-// sections, the user presets, the FM6 bank, the SYN kits, the MIDI map, the theme and the sample slots. The file is the
-// editor's own ("sloop-backup" v1), so an archive made here opens in the web editor of the firmware it came from.
+// sections, the user presets, the FM6 bank, the SYN kits, the MIDI map, the theme and the sample slots. The file is
+// SLOOP's editor's own ("sloop-backup" v1), so an archive of SLOOP opens there.
 //
 // Every firmware of the family is backed up the same way, because each lists what it holds. Writing back is another
-// matter: those built on SLOOP keep objects of their own, in orders and formats only their own editors know, so the app
-// writes back SLOOP's archives to SLOOP and leaves the others to their editors.
+// matter: those built on SLOOP keep objects of their own, in orders only their own editors know, and not all of those
+// editors read this file (Jangada's wants its own format). So the app writes back SLOOP's archives to SLOOP and says of
+// the others that it can't.
 
 import Foundation
 
@@ -56,6 +57,10 @@ struct EditorInfo: Equatable {
     }
     var name: String { EditorInfo.ownName(of: version) }
 
+    /// SLOOP itself, not a firmware built on it that renamed itself.
+    static func isSloop(_ version: String) -> Bool { ownName(of: version).hasPrefix("SLOOP ") }
+    var isSloop: Bool { EditorInfo.isSloop(version) }
+
     /// The firmware sends at most 24 characters here, so one that long may be cut in the middle of its version:
     /// "FELUCCA CoralFlower 0.6." is 0.6.1. Then it says nothing about the version, and nothing is taken from it.
     static func wholeName(of version: String) -> String? { version.count < 24 ? ownName(of: version) : nil }
@@ -96,8 +101,8 @@ enum SloopBackup {
     static let sampleIds = [32, 33, 34, 35]
     /// Objects a firmware older than the file may not have: it answers their begin with 1 or 5, and they are skipped.
     static let optionalIds: Set<Int> = [8, 9, 10, 11]
-    /// What the app says of an archive it leaves to the firmware's own editor.
-    static let ownEditorOnly = "This music goes back through the web editor of the firmware it came from. Share the files from this backup and open the sloop-backup file there."
+    /// What the app says of an archive it can't write back.
+    static let ownEditorOnly = "The app can only put music back on SLOOP. This firmware's own web editor may open the file: share the files from this backup and try it there before you rely on it."
     /// Far above any object an FM-1 can hold: a manifest may not make the phone allocate more than this for one.
     static let maxObjectSize = 1 << 20
 
@@ -258,8 +263,8 @@ enum SloopBackup {
     static func restore(_ fl: some EditorLink, _ file: SloopArchive, info: EditorInfo, onProgress: @escaping (Int, Int) -> Void) async throws {
         var bytesOf = try validate(file)
         let madeOn = EditorInfo.ownName(of: file.firmware)
-        guard madeOn.hasPrefix("SLOOP ") else { throw FM1Error.package(ownEditorOnly) }
-        guard info.hasBackup, info.name.hasPrefix("SLOOP ") else {
+        guard EditorInfo.isSloop(file.firmware) else { throw FM1Error.package(ownEditorOnly) }
+        guard info.hasBackup, info.isSloop else {
             throw FM1Error.package("This music was made on \(madeOn), and the FM-1 runs \(info.name). Restore the firmware first.")
         }
         // Back onto an older SLOOP: stop before anything is written if it can't read the projects, not at the first one.

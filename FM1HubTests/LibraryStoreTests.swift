@@ -123,6 +123,7 @@ final class LibraryStoreTests: XCTestCase {
             XCTAssertTrue(found.hasSloopArchive)
             XCTAssertEqual(found.firmwareName, "SLOOP 2.8.4")
             XCTAssertEqual(found.reportedName, "SLOOP 2.8.4")
+            XCTAssertEqual(found.archiveFirmware, "FELUCCA SLOOP 2.8.4")
             XCTAssertEqual(found.date, ISO8601DateFormatter().date(from: archive.date))
         }
     }

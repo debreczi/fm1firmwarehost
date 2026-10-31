@@ -71,6 +71,8 @@ final class DeviceController {
     private(set) var midiPorts: [String] = []
     private(set) var loaderWaiting: FM1Identity?
     private(set) var musicBackupSupported: Bool?
+    /// Can the app put the music it backs up back on this firmware? Not on one built on SLOOP.
+    private(set) var musicWritesBack = true
     /// What the running firmware says of itself over the editor protocol, when it speaks it: "SLOOP 2.8.4".
     private(set) var reportedName: String?
     /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
@@ -215,6 +217,7 @@ final class DeviceController {
         dev.link.close()
         reportedName = music.info?.wholeName
         musicBackupSupported = music.kind != nil
+        musicWritesBack = music.kind != .sloop || music.info?.isSloop == true
         append("firmware says: \(music.info?.version ?? "nothing")")
         append(music.kind != nil ? "backup protocol: supported" : "backup protocol: not answered")
     }
@@ -379,9 +382,6 @@ final class DeviceController {
         // Cancel reaches the updater of the moment, and the updater made here starts afresh: one pressed before now, or
         // while the loader is asked for below, is only remembered by the task.
         if Task.isCancelled { throw FM1Error.cancelled }
-        // whatever this leaves on the FM-1, it is no longer known to be what answered before
-        reportedName = nil
-        musicBackupSupported = nil
         let up = makeUpdater()
         let image = pkg.logicalImage
         try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
@@ -393,6 +393,9 @@ final class DeviceController {
         // before the hook ever runs cannot undo the recovery record of an earlier write that did go half-way.
         var token: LibraryStore.AttemptToken?
         let record: FM1Updater.BeforeWriting = { [self] found in
+            // whatever this leaves on the FM-1, it is no longer known to be what answered before
+            reportedName = nil
+            musicBackupSupported = nil
             token = try library.beginAttempt(PendingUpdate(product: pkg.product, sha256: pkg.sha256, firmwareId: firmwareId,
                                                            name: name, version: version, usesStockLoader: stockLoader,
                                                            source: source, identityBefore: found.text))
@@ -587,7 +590,7 @@ final class DeviceController {
             j.title = s.name
             let pkgText = s.hasPackage ? "its firmware package" : catalog.identityIsAmbiguous(s.identity) ? "no firmware package yet (choose yours in the backup)" : "no firmware package (see the backup for why)"
             let musicText = s.hasArchive
-                ? "and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))"
+                ? "and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))" + (s.musicRestoresInApp ? "" : ", which the app can't put back on this firmware")
                 : "but no music archive: this firmware has no backup over USB that the app knows"
             let what = s.firmwareId == nil && catalog.identityIsAmbiguous(s.identity) ? "" : " \(s.firmwareName)\(s.version.map { " \($0)" } ?? "")"
             j.message = "Saved\(what): \(pkgText), \(musicText)."
@@ -639,7 +642,9 @@ final class DeviceController {
             s.archiveFile = SloopArchive.fileName
             s.archiveBytes = archive.totalBytes
             s.archiveObjects = archive.objects.count
+            s.archiveFirmware = info.version
             musicBackupSupported = true
+            musicWritesBack = info.isSloop
         } else {
             musicBackupSupported = false
         }
@@ -696,6 +701,7 @@ final class DeviceController {
             }
             // alone on this number: the hub's version rather than none, and the backup says it may not be that version
             if !ambiguous, f.product == identity, let p = try? await packages.package(for: f) { return (p, "hub") }
+            return nil   // it said which version it is: no other build with this identity may be taken for it
         }
         // Any other package with this identity may be another firmware. Never guess.
         if ambiguous { return nil }

@@ -106,7 +106,7 @@ struct SnapshotDetailView: View {
     private var musicFacts: String {
         guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
         let size = ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file)
-        let format = snapshot.hasSloopArchive ? "sloop-backup v1, opens in the web editor of the firmware it came from" : "felucca-backup v1, opens in the Felucca web editor too"
+        let format = !snapshot.hasSloopArchive ? "felucca-backup v1, opens in the Felucca web editor too" : snapshot.musicRestoresInApp ? "sloop-backup v1, opens in the SLOOP web editor too" : "sloop-backup v1"
         return "\(snapshot.archiveObjects ?? 0) objects, \(size) (\(format))"
     }
 

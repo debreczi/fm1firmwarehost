@@ -191,6 +191,26 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertNil(EditorInfo(version: "FELUCCA sloopDX 4.0 BETA", paramCount: 70, protocolVersion: 9).wholeName, "exactly 24: it may be cut")
     }
 
+    func testOnlySLOOPItselfIsSLOOP() {
+        XCTAssertTrue(EditorInfo.isSloop("FELUCCA SLOOP 2.8.4"))
+        XCTAssertFalse(EditorInfo.isSloop("FELUCCA sloopDX 4.0 BETA"))
+        XCTAssertFalse(EditorInfo.isSloop("FELUCCA CLIPPER 1.3"))
+        XCTAssertFalse(EditorInfo.isSloop("FELUCCA 2.4 BETA"), "SLOOP Floyd FM's release build")
+    }
+
+    func testABackupKnowsWhetherTheAppCanWriteItsMusicBack() {
+        var s = Snapshot(name: "A", identity: "FM-1_900", firmwareId: nil, firmwareName: "A", version: nil, product: nil, packageFile: nil,
+                         packageSHA256: nil, packageSize: nil, packageExact: false, archiveFile: "felucca-backup.json", archiveBytes: 1, archiveObjects: 1)
+        XCTAssertTrue(s.musicRestoresInApp, "a Felucca archive")
+        s.archiveFile = SloopArchive.fileName
+        s.archiveFirmware = "FELUCCA SLOOP 2.8.4"
+        XCTAssertTrue(s.musicRestoresInApp)
+        s.archiveFirmware = "FELUCCA sloopDX 4.0 BETA"
+        XCTAssertFalse(s.musicRestoresInApp, "even with a name of 24 characters, which names no firmware")
+        s.archiveFirmware = "FELUCCA BY"
+        XCTAssertFalse(s.musicRestoresInApp, "a firmware built on it")
+    }
+
     func testFirmwareBeforeTheProtocolVersionByteHasNoBackup() async {
         let old = Self.aDevice()
         old.proto = nil

@@ -110,7 +110,7 @@ struct FirmwareListView: View {
         var s = "\(f.sizeText), by \(f.author). "
         if let w = device.whoIs { s += "It replaces \(w.firmware?.name ?? w.name). " }
         s += settings.autoSnapshotBeforeInstall
-            ? "The music of a Felucca or SLOOP firmware is backed up first. Other firmwares: save your work with their own tool first."
+            ? "The music of a Felucca or SLOOP firmware is backed up first. On a firmware built on SLOOP the app can't put it back, and on others it saves none: save your work with their own tool first."
             : "Saved what you want to keep? The new firmware may not read the old one's projects."
         return s
     }

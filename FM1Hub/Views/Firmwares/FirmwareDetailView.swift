@@ -115,7 +115,7 @@ struct FirmwareDetailView: View {
             Button("Install") { device.install(firmware) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text((device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca or SLOOP firmware is backed up first when that setting is on.")
+            Text((device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca or SLOOP firmware is backed up first when that setting is on. On a firmware built on SLOOP the app can't put it back.")
         }
     }
 

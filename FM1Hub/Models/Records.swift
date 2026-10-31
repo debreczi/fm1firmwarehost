@@ -113,10 +113,11 @@ struct Snapshot: Codable, Identifiable, Hashable {
     var reportedName: String? = nil     // what the firmware said of itself, "SLOOP 2.8.4"
     var packageConfirmed: Bool? = nil   // the device itself named the firmware of this package
     var packageNote: String? = nil      // why there is no package, while there is none
+    var archiveFirmware: String? = nil  // what the firmware said when a SLOOP archive was made, "FELUCCA SLOOP 2.8.4"
 
     var hasPackage: Bool { packageFile != nil }
     var hasArchive: Bool { archiveFile != nil }
     var hasSloopArchive: Bool { archiveFile == SloopArchive.fileName }
-    /// Whether the app writes this backup's music back itself, or leaves it to the firmware's own web editor.
-    var musicRestoresInApp: Bool { !hasSloopArchive || reportedName?.hasPrefix("SLOOP ") != false }
+    /// Whether the app can write this backup's music back itself.
+    var musicRestoresInApp: Bool { !hasSloopArchive || archiveFirmware.map(EditorInfo.isSloop) != false }
 }
