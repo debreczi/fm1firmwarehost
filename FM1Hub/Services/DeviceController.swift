@@ -70,7 +70,9 @@ final class DeviceController {
     private(set) var otherPorts: [String] = []
     private(set) var midiPorts: [String] = []
     private(set) var loaderWaiting: FM1Identity?
-    private(set) var feluccaBackupSupported: Bool?
+    private(set) var musicBackupSupported: Bool?
+    /// What the running firmware says of itself over the editor protocol, when it speaks it: "SLOOP 2.8.4".
+    private(set) var reportedName: String?
     /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
     private(set) var officialLatest: String?
     private(set) var officialChecking = false
@@ -91,7 +93,9 @@ final class DeviceController {
         officialLatest = packages.newestCachedOfficial()?.product
     }
 
-    var whoIs: WhoIs? { catalog.whoIs(identity?.text) }
+    var whoIs: WhoIs? { catalog.whoIs(identity?.text, named: reportedName) }
+    /// What a new backup is called until the user says otherwise.
+    var backupName: String { identity.map { whoIsName($0) } ?? "" }
     var isConnected: Bool { identity != nil }
     var isBusy: Bool { phase.isBusy }
     var officialLatestVersion: String? { officialLatest.flatMap { FWSCPackage.officialVersion(of: $0) } }
@@ -122,7 +126,7 @@ final class DeviceController {
     func seedDemo() {
         if let f = catalog.firmware(id: "felucca") { identity = FM1Identity.parse(text: f.product) }
         identityDate = Date().addingTimeInterval(-90)
-        feluccaBackupSupported = true
+        musicBackupSupported = true
         officialLatest = "FM-1_016"
         midiPorts = ["Felucca"]
         if Demo.job, let x = catalog.firmware(id: "x0x") {
@@ -137,7 +141,8 @@ final class DeviceController {
         refreshPorts()
         if midiPorts.isEmpty, !isBusy {
             identity = nil
-            feluccaBackupSupported = nil
+            musicBackupSupported = nil
+            reportedName = nil
             loaderWaiting = nil          // unplugged: the Resume card must not keep claiming a loader is waiting
             statusMessage = "No MIDI device."
         }
@@ -176,12 +181,14 @@ final class DeviceController {
                 otherPorts = []
                 statusMessage = ""
                 append("identity \(dev.identity.text) on \(dev.portName)")
-                feluccaBackupSupported = nil
+                musicBackupSupported = nil
+                reportedName = nil
                 reconcilePending(dev.identity)
-                if !dev.identity.isLoader { await probeFeluccaSupport() }
+                if !dev.identity.isLoader { await probeMusicBackup() }
             } else {
                 identity = nil
-                feluccaBackupSupported = nil
+                musicBackupSupported = nil
+                reportedName = nil
                 loaderWaiting = nil          // nothing answered: there is no loader to show a Resume card for
                 otherPorts = up.others()
                 statusMessage = "No FM-1 found" + up.seen() + ". Plug it in by USB, close other MIDI apps, try again."
@@ -195,14 +202,16 @@ final class DeviceController {
         }
     }
 
-    /// Does the running firmware answer the Felucca backup protocol? (Felucca and the firmwares built on it do.)
-    private func probeFeluccaSupport() async {
+    /// What does the running firmware say of itself, and does it answer a music backup? (Felucca, SLOOP and the
+    /// firmwares built on them do.)
+    private func probeMusicBackup() async {
         guard let dev = await openDevice() else { return }
-        let fl = FeluccaLink(link: dev.link)
-        let ok = await FeluccaBackup.supported(fl)
+        let music = await SloopBackup.detect(FeluccaLink(link: dev.link))
         dev.link.close()
-        feluccaBackupSupported = ok
-        append(ok ? "backup protocol: supported" : "backup protocol: not answered")
+        reportedName = music.info?.version
+        musicBackupSupported = music.kind != nil
+        append("firmware says: \(reportedName ?? "nothing")")
+        append(music.kind != nil ? "backup protocol: supported" : "backup protocol: not answered")
     }
 
     private func openDevice() async -> FM1Device? {
@@ -335,7 +344,8 @@ final class DeviceController {
             identity = FM1Identity.parse(text: after)
             identityDate = Date()
             loaderWaiting = nil
-            feluccaBackupSupported = nil
+            musicBackupSupported = nil
+            reportedName = nil
             // the id the record was made with, not whatever the catalogue happens to hold now
             library.add(InstallRecord(firmwareId: pending.firmwareId, name: pending.name, version: pending.version, product: after, sha256: pkg.sha256,
                                       identityBefore: "update loader", identityAfter: after, source: .resume, success: true))
@@ -405,7 +415,8 @@ final class DeviceController {
         identity = FM1Identity.parse(text: after)
         identityDate = Date()
         loaderWaiting = nil
-        feluccaBackupSupported = nil
+        musicBackupSupported = nil
+        reportedName = nil
         return after
     }
 
@@ -476,16 +487,17 @@ final class DeviceController {
 
     // MARK: Snapshots
 
-    /// Before an install: when the setting is on and the running firmware answers the backup protocol, keep its music.
+    /// Before an install: when the setting is on and the running firmware answers a music backup, keep its music.
     private func autoSnapshotIfWanted() async throws {
         guard settings.autoSnapshotBeforeInstall else { return }
         guard let dev = await openDevice() else { return }
         let fl = FeluccaLink(link: dev.link)
-        guard await FeluccaBackup.supported(fl) else { dev.link.close(); return }
+        let music = await SloopBackup.detect(fl)
+        guard music.kind != nil else { dev.link.close(); return }
         append("auto backup before install")
         identity = dev.identity
         do {
-            let s = try await makeSnapshot(dev: dev, fl: fl, name: "Before install · \(whoIsName(dev.identity))")
+            let s = try await makeSnapshot(dev: dev, fl: fl, music: music, name: nil, prefix: "Before install · ")
             library.add(s)
         } catch {
             append("auto backup failed: \(error.localizedDescription)")
@@ -496,13 +508,14 @@ final class DeviceController {
     }
 
     private func whoIsName(_ id: FM1Identity) -> String {
-        let w = catalog.whoIs(id.text)
+        let w = catalog.whoIs(id.text, named: reportedName)
         if let f = w?.firmware { return f.name + (w?.exact == true ? " \(f.version)" : "") }
+        if catalog.firmwares(reporting: id.text).count > 1 { return reportedName ?? id.text }
         return w?.name ?? id.text
     }
 
-    /// Save the state of the FM-1: which firmware is on it with its package (found wherever it is), plus the Felucca
-    /// archive when the firmware answers the backup protocol.
+    /// Save the state of the FM-1: which firmware is on it with its package (found wherever it is), plus the music
+    /// archive when the firmware answers a music backup.
     func snapshot(name: String?) {
         guard !isBusy else { return }
         let j = DeviceJob(kind: .snapshot, title: name ?? "Backup", subtitle: "Saving the state of your FM-1", colour: Color(hex: "#42f5f5"), imageURL: nil)
@@ -512,9 +525,10 @@ final class DeviceController {
             identity = dev.identity
             identityDate = Date()
             let fl = FeluccaLink(link: dev.link)
+            let music = await SloopBackup.detect(fl)
             let s: Snapshot
             do {
-                s = try await makeSnapshot(dev: dev, fl: fl, name: name ?? whoIsName(dev.identity))
+                s = try await makeSnapshot(dev: dev, fl: fl, music: music, name: name)
             } catch {
                 dev.link.close()
                 throw error
@@ -522,26 +536,29 @@ final class DeviceController {
             dev.link.close()
             library.add(s)
             j.title = s.name
-            let pkgText = s.hasPackage ? "its firmware package" : "no firmware package (see the backup for why)"
+            let shared = catalog.firmwares(reporting: s.identity).count > 1
+            let pkgText = s.hasPackage ? "its firmware package" : shared ? "no firmware package yet (choose yours in the backup)" : "no firmware package (see the backup for why)"
             let musicText = s.hasArchive
                 ? "and the music archive (\(ByteCountFormatter.string(fromByteCount: Int64(s.archiveBytes ?? 0), countStyle: .file)))"
-                : "but no music archive: this firmware does not offer one over USB"
+                : "but no music archive: this firmware has no backup over USB that the app knows"
             j.message = "Saved \(s.firmwareName)\(s.version.map { " \($0)" } ?? ""): \(pkgText), \(musicText)."
             if s.firmwareId != nil, let c = s.firmwareId.map({ Look.colour(for: $0) }) { j.colour = c }
             return j
         } onFailure: { _ in }
     }
 
-    private func makeSnapshot(dev: FM1Device, fl: FeluccaLink, name: String) async throws -> Snapshot {
-        let who = catalog.whoIs(dev.identity.text)
-        var s = Snapshot(name: name, identity: dev.identity.text, firmwareId: who?.firmware?.id,
+    private func makeSnapshot(dev: FM1Device, fl: FeluccaLink, music: (info: EditorInfo?, kind: MusicBackupKind?), name: String?, prefix: String = "") async throws -> Snapshot {
+        reportedName = music.info?.version
+        let who = catalog.whoIs(dev.identity.text, named: reportedName)
+        var s = Snapshot(name: name ?? prefix + whoIsName(dev.identity), identity: dev.identity.text, firmwareId: who?.firmware?.id,
                          firmwareName: who?.firmware?.name ?? who?.name ?? dev.identity.text,
                          version: who?.exact == true ? who?.firmware?.version : nil, product: nil, packageFile: nil,
                          packageSHA256: nil, packageSize: nil, packageExact: false, archiveFile: nil, archiveBytes: nil, archiveObjects: nil)
+        s.reportedName = reportedName
         let folder = library.folder(for: s)
         Paths.ensure(folder)
         // the music, first: while the device is still the one we found
-        if await FeluccaBackup.supported(fl) {
+        if music.kind == .felucca {
             phase = .backingUp(0, 1)
             let archive = try await FeluccaBackup.capture(fl, firmware: dev.identity.text) { d, t in Task { @MainActor in self.phase = .backingUp(d, t) } }
             let enc = JSONEncoder()
@@ -551,15 +568,32 @@ final class DeviceController {
             s.archiveFile = "felucca-backup.json"
             s.archiveBytes = archive.totalBytes
             s.archiveObjects = archive.objects.count
-            feluccaBackupSupported = true
+            musicBackupSupported = true
+        } else if music.kind == .sloop, let info = music.info {
+            phase = .backingUp(0, 1)
+            let archive = try await SloopBackup.capture(fl, info: info) { d, t in Task { @MainActor in self.phase = .backingUp(d, t) } }
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.sortedKeys]
+            let data = try enc.encode(archive)
+            try data.write(to: folder.appendingPathComponent(SloopArchive.fileName), options: .atomic)
+            s.archiveFile = SloopArchive.fileName
+            s.archiveBytes = archive.totalBytes
+            s.archiveObjects = archive.objects.count
+            musicBackupSupported = true
         } else {
-            feluccaBackupSupported = false
+            musicBackupSupported = false
         }
         // the package: wherever it is
+        let sharing = catalog.firmwares(reporting: dev.identity.text).count
         if let found = await findPackage(for: dev.identity.text, who: who) {
             let (pkg, from) = found
-            try storePackage(pkg, in: &s)
+            // with a shared identity the only package findPackage returns is the one the device itself named
+            try storePackage(pkg, in: &s, confirmed: sharing > 1)
             append("package for \(dev.identity.text): \(from)")
+        } else if sharing > 1 {
+            s.notes = who?.firmware.map { "\($0.name) \($0.version) could not be loaded from the hub. Choose it below when the phone is online." }
+                ?? "\(sharing) firmwares report \(dev.identity.text), and this one did not say which it is. Choose yours and this backup becomes restorable."
+            append("\(sharing) firmwares report \(dev.identity.text): no package chosen")
         } else {
             s.notes = "No package found for \(dev.identity.text): not on the hub, not on this phone, not among the makers' GitHub releases. Install it once through the app, or pick its .fwsc below, and this backup becomes restorable."
             append("no package found for \(dev.identity.text)")
@@ -574,6 +608,8 @@ final class DeviceController {
             phase = .searching("The hub has \(f.name) \(f.version).")
             if let p = try? await packages.package(for: f) { return (p, "hub") }
         }
+        // Several firmwares report this identity, so any other package with it may be another firmware. Never guess.
+        if catalog.firmwares(reporting: identity).count > 1 { return nil }
         phase = .searching("Looking on this phone…")
         if let p = packages.localPackage(product: identity) { return (p, "phone") }
         if FWSCPackage.isOfficialProduct(identity) {
@@ -591,19 +627,39 @@ final class DeviceController {
         return nil
     }
 
-    private func storePackage(_ pkg: FWSCPackage, in s: inout Snapshot) throws {
+    /// `confirmed`: the identity is shared, and the device itself named this firmware. Without that, a shared identity
+    /// says nothing about which firmware the package is, or whether it is the one that was on the device.
+    private func storePackage(_ pkg: FWSCPackage, in s: inout Snapshot, confirmed: Bool = false) throws {
         let folder = library.folder(for: s)
         Paths.ensure(folder)
         try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
+        let shared = catalog.firmwares(reporting: pkg.product).count > 1
         s.packageFile = "package.fwsc"
         s.packageSHA256 = pkg.sha256
         s.packageSize = pkg.bytes.count
         s.product = pkg.product
-        s.packageExact = pkg.product == s.identity
+        s.packageExact = pkg.product == s.identity && (!shared || confirmed)
+        s.packageConfirmed = confirmed ? true : nil
         if let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
         else if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
+        else if shared { s.version = nil; s.firmwareId = nil; s.firmwareName = catalog.whoIs(pkg.product)?.name ?? pkg.product }
         else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
         s.notes = ""
+    }
+
+    /// A backup whose identity several firmwares share, completed with the one the user says it is, from the hub.
+    func attachFirmware(_ f: Firmware, to snapshot: Snapshot) {
+        guard !isBusy, f.product == snapshot.identity else { return }
+        var j = DeviceJob(kind: .snapshot, title: snapshot.name, subtitle: "\(f.name) \(f.version)", colour: Look.colour(for: f.id), imageURL: f.imageURL)
+        start(job: j) { [self] in
+            phase = .searching("The hub has \(f.name) \(f.version).")
+            let pkg = try await packages.package(for: f)
+            var s = snapshot
+            try storePackage(pkg, in: &s)
+            library.update(s)
+            j.message = "\(f.name) \(f.version) is saved with this backup."
+            return j
+        } onFailure: { _ in }
     }
 
     /// A backup made without a package, completed from a .fwsc the user picked in Files. Returns an error text or nil.
@@ -645,11 +701,15 @@ final class DeviceController {
         }
     }
 
-    /// Put a snapshot's music archive back (the firmware must be a Felucca-family one, best the same).
+    /// Put a snapshot's music archive back (the firmware must speak the archive's protocol, best the same firmware).
     func restoreArchive(_ s: Snapshot) {
         guard !isBusy, let url = library.archiveURL(for: s) else { return }
         var j = DeviceJob(kind: .restoreArchive, title: "Restore music: \(s.name)", subtitle: s.firmwareName, colour: Color(hex: "#42f5f5"), imageURL: nil)
         start(job: j) { [self] in
+            if s.hasSloopArchive {
+                j.message = try await restoreSloopArchive(from: url, firmwareName: s.firmwareName)
+                return j
+            }
             let archive = try JSONDecoder().decode(FeluccaArchive.self, from: try Data(contentsOf: url))
             _ = try FeluccaBackup.validate(archive)
             guard let dev = await openDevice() else { throw FM1Error.notFound("FM-1 not found" + (updater?.seen() ?? "")) }
@@ -670,6 +730,30 @@ final class DeviceController {
             j.message = "The music archive is back on your FM-1" + (archive.firmware != dev.identity.text ? " (it was made on \(archive.firmware), the FM-1 runs \(dev.identity.text))." : ".")
             return j
         } onFailure: { _ in }
+    }
+
+    /// Writes a SLOOP archive back and returns what to tell the user. The file is checked before the FM-1 is touched.
+    private func restoreSloopArchive(from url: URL, firmwareName: String) async throws -> String {
+        let archive = try JSONDecoder().decode(SloopArchive.self, from: try Data(contentsOf: url))
+        _ = try SloopBackup.validate(archive)
+        guard let dev = await openDevice() else { throw FM1Error.notFound("FM-1 not found" + (updater?.seen() ?? "")) }
+        identity = dev.identity
+        let fl = FeluccaLink(link: dev.link)
+        let music = await SloopBackup.detect(fl)
+        reportedName = music.info?.version
+        guard music.kind == .sloop, let info = music.info else {
+            dev.link.close()
+            throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.version ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(firmwareName) first, then the music.")
+        }
+        phase = .restoring(0, archive.totalBytes)
+        do {
+            try await SloopBackup.restore(fl, archive, info: info) { d, t in Task { @MainActor in self.phase = .restoring(d, t) } }
+        } catch {
+            dev.link.close()
+            throw error
+        }
+        dev.link.close()
+        return "The music archive is back on your FM-1" + (archive.firmware != info.version ? " (it was made on \(archive.firmware), the FM-1 runs \(info.version))." : ".")
     }
 
     func dismissJob() {

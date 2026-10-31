@@ -57,7 +57,7 @@ final class CatalogStore {
     }
 
     @discardableResult
-    private func apply(_ data: Data) -> Bool {
+    func apply(_ data: Data) -> Bool {
         guard let cat = try? JSONDecoder().decode(Catalog.self, from: data) else { return false }
         firmwares = cat.firmwares.filter { !$0.pkg.isEmpty && !$0.product.isEmpty }
         stock = cat.stock
@@ -66,15 +66,20 @@ final class CatalogStore {
         return true
     }
 
+    /// The firmwares of the catalogue that report this identity. More than one: the identity alone can't say which runs.
+    func firmwares(reporting identity: String) -> [Firmware] { firmwares.filter { $0.product == identity } }
+
     /// The firmware behind an identity string, as the hub's whoIs(): an exact product match names one, a family
-    /// range (the "ident" pattern) names one when only one matches.
-    func whoIs(_ text: String?) -> WhoIs? {
+    /// range (the "ident" pattern) names one when only one matches. Several firmwares with that very identity: what the
+    /// device says of itself (`reported`) can name one.
+    func whoIs(_ text: String?, named reported: String? = nil) -> WhoIs? {
         guard let text = text, !text.isEmpty else { return nil }
         if let v = FWSCPackage.officialVersion(of: text) { return WhoIs(firmware: nil, exact: true, name: "the official firmware (\(v))") }
         if text == "FM-1_000" { return WhoIs(firmware: nil, exact: true, name: "the USB rescue mode (FM-1_000)") }
         if text.lowercased().hasPrefix("ota-") { return WhoIs(firmware: nil, exact: true, name: "the update loader (\(text))") }
         let exact = firmwares.filter { $0.product == text }
         if exact.count == 1 { return WhoIs(firmware: exact[0], exact: true, name: exact[0].name) }
+        if let f = Firmware.named(reported, among: exact) { return WhoIs(firmware: f, exact: true, name: f.name) }
         if exact.count == 2 { return WhoIs(firmware: nil, exact: false, name: exact.map(\.name).joined(separator: " or ")) }
         if exact.count > 2 { return WhoIs(firmware: nil, exact: false, name: "one of \(exact.count) firmwares that report \(text)") }
         var fam = firmwares.filter { f in

@@ -231,19 +231,23 @@ final class LibraryStore {
             }
             let pkgURL = dir.appendingPathComponent("package.fwsc")
             let arcURL = dir.appendingPathComponent("felucca-backup.json")
+            let sloopURL = dir.appendingPathComponent(SloopArchive.fileName)
             let pkg = (try? Data(contentsOf: pkgURL)).flatMap { try? FWSCPackage(data: $0) }
             let archive = (try? Data(contentsOf: arcURL)).flatMap { try? JSONDecoder().decode(FeluccaArchive.self, from: $0) }
-            guard pkg != nil || archive != nil else { continue }   // an empty folder holds nothing to restore
-            let identity = archive?.firmware ?? pkg!.product
+            let sloop = (try? Data(contentsOf: sloopURL)).flatMap { try? JSONDecoder().decode(SloopArchive.self, from: $0) }
+            // a SLOOP archive names the firmware ("SLOOP 2.8.4"), not its identity
+            guard let identity = archive?.firmware ?? pkg?.product ?? sloop?.firmware else { continue }   // an empty folder holds nothing to restore
             let created = archive.flatMap { ISO8601DateFormatter().date(from: $0.created) }
+                ?? sloop.flatMap { ISO8601DateFormatter().date(from: $0.date) }
                 ?? (try? dir.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
             var s = Snapshot(name: "Recovered backup · \(identity)", identity: identity, firmwareId: nil,
-                             firmwareName: pkg?.officialVersion.map { _ in "Official firmware" } ?? identity,
+                             firmwareName: pkg?.officialVersion.map { _ in "Official firmware" } ?? sloop?.firmware ?? identity,
                              version: pkg?.officialVersion, product: pkg?.product,
                              packageFile: pkg != nil ? "package.fwsc" : nil, packageSHA256: pkg?.sha256, packageSize: pkg?.bytes.count,
                              packageExact: pkg?.product == identity,
-                             archiveFile: archive != nil ? "felucca-backup.json" : nil,
-                             archiveBytes: archive?.totalBytes, archiveObjects: archive?.objects.count)
+                             archiveFile: archive != nil ? "felucca-backup.json" : sloop != nil ? SloopArchive.fileName : nil,
+                             archiveBytes: archive?.totalBytes ?? sloop?.totalBytes, archiveObjects: archive?.objects.count ?? sloop?.objects.count)
+            s.reportedName = sloop?.firmware
             s.id = id
             s.date = created
             found.append(s)
@@ -257,7 +261,7 @@ final class LibraryStore {
     /// Names recovered backups after the catalogue is loaded ("Skiff" instead of "FM-1_720" where the hub knows it).
     func nameRecovered(using catalog: CatalogStore) {
         var changed = false
-        for i in snapshots.indices where snapshots[i].firmwareName == snapshots[i].identity {
+        for i in snapshots.indices where snapshots[i].firmwareName == snapshots[i].identity && snapshots[i].identity.hasPrefix("FM-1_") {
             if let w = catalog.whoIs(snapshots[i].identity) {
                 let n = w.firmware?.name ?? w.name
                 if n != snapshots[i].firmwareName {

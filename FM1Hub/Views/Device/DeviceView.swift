@@ -45,7 +45,7 @@ struct DeviceView: View {
                 Button("Save") { device.snapshot(name: snapshotName.isEmpty ? nil : snapshotName) }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Saves which firmware is on the FM-1 and its package; a Felucca-family firmware's music, settings, projects and samples too.")
+                Text("Saves which firmware is on the FM-1 and its package; on Felucca and SLOOP firmwares, the music, settings, projects and samples too.")
             }
         }
     }
@@ -77,8 +77,8 @@ struct DeviceView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if let s = device.feluccaBackupSupported, device.isConnected {
-                Label(s ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "No music backup over USB: use this firmware's own backup tool for projects and presets.",
+            if let s = device.musicBackupSupported, device.isConnected {
+                Label(s ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",
                       systemImage: s ? "checkmark.seal" : "info.circle")
                     .font(.system(size: 12)).foregroundStyle(s ? Theme.ok : Theme.textDim)
             }
@@ -122,10 +122,10 @@ struct DeviceView: View {
         VStack(alignment: .leading, spacing: 2) {
             SectionHeader(text: "Actions")
             VStack(spacing: 10) {
-                Button { snapshotName = device.whoIs?.firmware?.name ?? device.whoIs?.name ?? ""; askName = true } label: {
+                Button { snapshotName = device.backupName; askName = true } label: {
                     Label("Back up the FM-1 now", systemImage: "externaldrive.badge.plus")
                 }.buttonStyle(PrimaryButtonStyle(tint: Theme.accent)).disabled(device.isBusy)
-                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases) and, on Felucca-family firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
+                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases) and, on Felucca and SLOOP firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
                     .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
             }
             .padding(14).card()
