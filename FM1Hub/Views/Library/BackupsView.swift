@@ -214,7 +214,7 @@ struct SnapshotDetailView: View {
         .confirmationDialog("Write the music archive to the FM-1?", isPresented: $confirmArchive, titleVisibility: .visible) {
             Button("Restore the music", role: .destructive) { device.restoreArchive(snapshot) }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("Replaces the current music, settings, projects, user banks and samples on the FM-1 with the archive. The FM-1 must run a \(snapshot.hasSloopArchive ? "SLOOP" : "Felucca-family") firmware, best \(snapshot.firmwareName), and be stopped.") }
+        } message: { Text("Replaces the current music, settings, projects, user banks and samples on the FM-1 with the archive. The FM-1 must run a \(snapshot.hasSloopArchive ? "SLOOP" : "Felucca-family") firmware, best \(catalog.firmwareName(of: snapshot)), and be stopped.") }
         .confirmationDialog("Delete this backup?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { library.remove(snapshot); dismiss() }
             Button("Cancel", role: .cancel) {}

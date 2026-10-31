@@ -89,6 +89,11 @@ final class CatalogStore {
         return owners.count > 1 || (owners.isEmpty && may.count > 1)
     }
 
+    /// What to call a backup's firmware in a sentence: not "one of 23 firmwares that report FM-1_900".
+    func firmwareName(of s: Snapshot) -> String {
+        s.firmwareId == nil && identityIsAmbiguous(s.identity) ? "this backup's firmware" : s.firmwareName
+    }
+
     /// A backup whose package nothing ties to the firmware that was on the device.
     func packageIsUnconfirmed(in s: Snapshot) -> Bool {
         guard !Demo.isOn, s.hasPackage, s.packageConfirmed != true else { return false }
@@ -96,8 +101,11 @@ final class CatalogStore {
     }
 
     /// The firmware behind an identity string, as the hub's whoIs(): an exact product match names one, a family
-    /// range (the "ident" pattern) names one when only one matches. What the device says of itself (`reported`) can name
-    /// one among those the identity may be: its name and version are the hub's, or its name with another version.
+    /// range (the "ident" pattern) names one when only one matches. What the device says of itself (`reported`) comes on
+    /// top: the hub's name and version on this very identity name that firmware. Its name with another version says the
+    /// firmware alone on this number is another version of itself or, on a number with no such owner, names which firmware
+    /// the identity is. A firmware alone on its number stays itself whatever other name it says: many keep the name of what
+    /// they are built on (Rainbow Mode says "FELUCCA v1.1.5").
     func whoIs(_ text: String?, named reported: String? = nil) -> WhoIs? {
         guard let text = text, !text.isEmpty else { return nil }
         let may = firmwares(reporting: text)
@@ -105,12 +113,12 @@ final class CatalogStore {
         if let v = official, may.isEmpty { return WhoIs(firmware: nil, exact: true, name: "the official firmware (\(v))") }
         if text == "FM-1_000" { return WhoIs(firmware: nil, exact: true, name: "the USB rescue mode (FM-1_000)") }
         if text.lowercased().hasPrefix("ota-") { return WhoIs(firmware: nil, exact: true, name: "the update loader (\(text))") }
-        if let f = Firmware.named(reported, among: may) { return WhoIs(firmware: f, exact: f.product == text, name: f.name) }
-        let sameName = may.filter { $0.versionSaid(in: reported) != nil }
-        if sameName.count == 1 { return WhoIs(firmware: sameName[0], exact: false, name: sameName[0].name) }
+        if let f = Firmware.named(reported, among: may), f.product == text { return WhoIs(firmware: f, exact: true, name: f.name) }
         if let v = official { return WhoIs(firmware: nil, exact: false, name: (may.map(\.name) + ["the official firmware (\(v))"]).joined(separator: " or ")) }
         let owners = may.filter { $0.product == text }
-        if owners.count == 1 { return WhoIs(firmware: owners[0], exact: true, name: owners[0].name) }
+        if owners.count == 1 { return WhoIs(firmware: owners[0], exact: owners[0].versionSaid(in: reported) == nil, name: owners[0].name) }
+        let sameName = may.filter { $0.versionSaid(in: reported) != nil }
+        if sameName.count == 1 { return WhoIs(firmware: sameName[0], exact: false, name: sameName[0].name) }
         let list = owners.isEmpty ? may : owners
         if list.count == 2 { return WhoIs(firmware: nil, exact: false, name: list.map(\.name).joined(separator: " or ")) }
         if list.count > 2 { return WhoIs(firmware: nil, exact: false, name: "one of \(list.count) firmwares that report \(text)") }

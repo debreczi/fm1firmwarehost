@@ -71,10 +71,26 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertFalse(c.packageIsUnconfirmed(in: s))
     }
 
-    func testAFirmwaresOwnWordsCanNameAnotherOfThoseItMayBe() {
-        let w = withSkiff().whoIs("FM-1_714", named: "Skiff 1.4")
-        XCTAssertEqual(w?.firmware?.id, "skiff")
-        XCTAssertEqual(w?.exact, false, "the hub's Skiff 1.4 is another package than this identity")
+    func testAFirmwareAloneOnItsNumberStaysItselfWhateverNameItKept() {
+        // what their source defines: built on Felucca or X0X, with that name still in place
+        let c = catalog(extra: [
+            Self.entry("rainbow", "Rainbow Mode", "1.1", "FM-1_911"),
+            Self.entry("x0x", "X0X", "1.0", "FM-1_9010100", ident: #"FM-1_90\\d{5}"#),
+            Self.entry("tribe", "TRIBE", "0.3", "FM-1_9000300")
+        ])
+        let cases = [("FM-1_911", "FELUCCA v1.1.5", "rainbow"), ("FM-1_913", "FELUCCA v1.3", "golana"), ("FM-1_9000300", "X0X 0.3-beta", "tribe")]
+        for (number, words, owner) in cases {
+            let w = c.whoIs(number, named: EditorInfo.ownName(of: words))
+            XCTAssertEqual(w?.firmware?.id, owner, words)
+            XCTAssertEqual(w?.exact, true, words)
+        }
+        XCTAssertEqual(withSkiff().whoIs("FM-1_714", named: "Skiff 1.4")?.firmware?.id, "matryoshka", "the hub knows only one owner of this number")
+    }
+
+    func testTheHubsNameAndVersionOnAnotherNumberNameNothing() {
+        // Felucca 1.8.0 reports FM-1_918: a firmware on another number saying so is not it
+        XCTAssertEqual(catalog().whoIs("FM-1_913", named: "Felucca 1.8.0")?.firmware?.id, "golana")
+        XCTAssertEqual(catalog().whoIs("FM-1_916", named: "Felucca 1.8.0")?.exact, false, "at most another version of it")
     }
 
     func testARangeSeveralShareWithNoOwnerIsAmbiguous() {
@@ -286,6 +302,26 @@ final class SharedIdentityTests: XCTestCase {
             XCTAssertNil(saved.firmwareId)
             XCTAssertNotEqual(saved.firmwareName, "Hortator", "not the first with that identity")
         }
+    }
+
+    func testAFirmwareThatSaidAnotherVersionIsNotExact() throws {
+        let data = FWSCPackageTests.makePackage(product: "FM-1_924", payload: 1024)
+        try withController(catalog()) { device, library in
+            var s = aBackup(identity: "FM-1_924", name: "SLOOP Floyd FM")
+            s.reportedName = "SLOOP Floyd FM 2.3"
+            library.add(s)
+            try attach(data, to: s, device: device)
+            XCTAssertEqual(library.snapshots.first?.packageExact, false, "the hub says 2.4 and the device said 2.3")
+        }
+    }
+
+    func testAFirmwaresNameInASentence() {
+        let c = catalog()
+        XCTAssertEqual(c.firmwareName(of: aBackup(identity: "FM-1_900")), "this backup's firmware")
+        var named = aBackup(identity: "FM-1_900", name: "SLOOP")
+        named.firmwareId = "sloop"
+        XCTAssertEqual(c.firmwareName(of: named), "SLOOP")
+        XCTAssertEqual(c.firmwareName(of: aBackup(identity: "FM-1_924", name: "SLOOP Floyd FM")), "SLOOP Floyd FM")
     }
 
     func testAPackageClearsTheAppsNoteButNeverTheUsers() throws {

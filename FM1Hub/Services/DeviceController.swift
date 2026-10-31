@@ -659,13 +659,13 @@ final class DeviceController {
             }
             append("package for \(dev.identity.text): \(from)")
         } else if catalog.firmwares.isEmpty {
-            s.packageNote = "The hub's catalogue could not be loaded, so the app can't tell which firmware this is. Open this backup again when the phone is online."
+            s.packageNote = "The hub's catalogue could not be loaded when this backup was made, so the app could not tell which firmware this is. Choose it when the phone is online, or pick its file."
             append("no catalogue: no package for \(dev.identity.text)")
         } else if let f = who?.firmware, who?.exact != true, let v = f.versionSaid(in: reportedName) {
-            s.packageNote = "Your FM-1 says it runs \(f.name) \(v). The hub has \(f.version), and that version is not among the maker's latest releases. Choose the hub's below, or pick its file."
+            s.packageNote = "Your FM-1 says it runs \(f.name) \(v). The hub has \(f.version), and the app could not get that version from the maker's releases. Choose the hub's, or pick its file."
             append("\(f.name) \(v) not found")
         } else if ambiguous {
-            s.packageNote = who?.firmware.map { "\($0.name) \($0.version) could not be loaded from the hub. Choose it below when the phone is online." }
+            s.packageNote = who?.firmware.map { "\($0.name) \($0.version) could not be loaded from the hub. Choose it when the phone is online." }
                 ?? "Several firmwares can report \(dev.identity.text), and this one did not say which it is. Choose yours and this backup becomes restorable."
             append("\(dev.identity.text) is ambiguous: no package chosen")
         } else {
@@ -692,6 +692,8 @@ final class DeviceController {
             if let p = await packages.releasePackage(product: identity, candidates: [f], version: v, onStatus: { t in Task { @MainActor in self.phase = .searching(t) } }) {
                 return (p, DeviceController.namedRelease)
             }
+            // alone on this number: the hub's version rather than none, and the backup says it may not be that version
+            if !ambiguous, f.product == identity, let p = try? await packages.package(for: f) { return (p, "hub") }
         }
         // Any other package with this identity may be another firmware. Never guess.
         if ambiguous { return nil }
@@ -719,11 +721,14 @@ final class DeviceController {
         Paths.ensure(folder)
         try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
         let ambiguous = catalog.identityIsAmbiguous(s.identity) || catalog.identityIsAmbiguous(pkg.product)
+        // the device said this firmware's name with another version than this package's
+        let who = catalog.whoIs(s.identity, named: s.reportedName)
+        let saidOtherVersion = who?.exact == false && who?.firmware?.versionSaid(in: s.reportedName) != nil
         s.packageFile = "package.fwsc"
         s.packageSHA256 = pkg.sha256
         s.packageSize = pkg.bytes.count
         s.product = pkg.product
-        s.packageExact = pkg.product == s.identity && (!ambiguous || confirmed)
+        s.packageExact = pkg.product == s.identity && (confirmed || (!ambiguous && !saidOtherVersion))
         s.packageConfirmed = confirmed ? true : nil
         if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
         else if !ambiguous, let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
@@ -744,6 +749,7 @@ final class DeviceController {
         start(job: j) { [self] in
             phase = .searching("The hub has \(f.name) \(f.version).")
             let pkg = try await packages.package(for: f)
+            if Task.isCancelled { throw FM1Error.cancelled }
             var s = snapshot
             try storePackage(pkg, in: &s, confirmed: f.isNamed(by: snapshot.reportedName, identity: snapshot.identity))
             library.update(s)
@@ -773,8 +779,7 @@ final class DeviceController {
     /// Put a snapshot's firmware back.
     func restoreFirmware(_ s: Snapshot) {
         guard !isBusy, let url = library.packageURL(for: s) else { return }
-        // not "one of 23 firmwares that report FM-1_900"
-        let what = s.firmwareId == nil && catalog.identityIsAmbiguous(s.identity) ? "This backup's firmware" : s.firmwareName
+        let what = catalog.firmwareName(of: s)
         var j = DeviceJob(kind: .restoreFirmware, title: "Restore: \(what)", subtitle: s.version ?? s.identity, colour: s.firmwareId.map { Look.colour(for: $0) } ?? Color(hex: "#42f5f5"), imageURL: s.firmwareId.map { HubAPI.url("img/\($0).png") })
         start(job: j) { [self] in
             let before = identity?.text
@@ -787,7 +792,7 @@ final class DeviceController {
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .snapshot, success: true))
-            j.message = "\(what) is back on your FM-1." + (s.hasArchive ? " Now restore the music archive from the same backup." : "")
+            j.message = "Back on your FM-1: \(what)." + (s.hasArchive ? " Now restore the music archive from the same backup." : "")
             return j
         } onFailure: { [self] e in
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: s.product ?? "", sha256: s.packageSHA256,
@@ -798,7 +803,7 @@ final class DeviceController {
     /// Put a snapshot's music archive back (the firmware must speak the archive's protocol, best the same firmware).
     func restoreArchive(_ s: Snapshot) {
         guard !isBusy, let url = library.archiveURL(for: s) else { return }
-        var j = DeviceJob(kind: .restoreArchive, title: "Restore music: \(s.name)", subtitle: s.firmwareName, colour: Color(hex: "#42f5f5"), imageURL: nil)
+        var j = DeviceJob(kind: .restoreArchive, title: "Restore music: \(s.name)", subtitle: catalog.firmwareName(of: s), colour: Color(hex: "#42f5f5"), imageURL: nil)
         start(job: j) { [self] in
             if s.hasSloopArchive {
                 j.message = try await restoreSloopArchive(from: url, of: s)
@@ -811,7 +816,7 @@ final class DeviceController {
             let fl = FeluccaLink(link: dev.link)
             guard await FeluccaBackup.supported(fl) else {
                 dev.link.close()
-                throw FM1Error.protocolError("The firmware on the FM-1 (\(dev.identity.text)) does not answer the backup protocol. Restore \(s.firmwareName) first, then the music.")
+                throw FM1Error.protocolError("The firmware on the FM-1 (\(dev.identity.text)) does not answer the backup protocol. Restore \(catalog.firmwareName(of: s)) first, then the music.")
             }
             if Task.isCancelled { dev.link.close(); throw FM1Error.cancelled }   // the last moment Cancel can be pressed
             phase = .restoring(0, archive.totalBytes)
@@ -838,7 +843,7 @@ final class DeviceController {
         reportedName = music.info?.name
         guard music.kind == .sloop, let info = music.info else {
             dev.link.close()
-            throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.name ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(s.firmwareName) first, then the music.")
+            throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.name ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(catalog.firmwareName(of: s)) first, then the music.")
         }
         // a firmware built on SLOOP can keep its name: its number tells it apart
         if s.identity.hasPrefix("FM-1_"), s.identity != dev.identity.text {

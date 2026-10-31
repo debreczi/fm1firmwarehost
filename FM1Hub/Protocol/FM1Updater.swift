@@ -170,12 +170,17 @@ final class FM1Updater {
                  onStep: @escaping (InstallStep) -> Void) async throws -> String {
         cancelled = false
         guard let dev = await find({ !$0.isLoader }) else {
+            if cancelled { throw FM1Error.cancelled }
             throw FM1Error.notFound("FM-1 not found (USB cable, and no other app using it?)" + seen())
         }
         let model = product.split(separator: "_").first.map(String.init) ?? product
         if dev.identity.model != model {
             dev.link.close()
             throw FM1Error.model("The device is \(dev.identity.text), the package is for \(product).")
+        }
+        if cancelled {
+            dev.link.close()
+            throw FM1Error.cancelled
         }
         do {
             try await beforeWriting(dev.identity)
@@ -253,7 +258,10 @@ final class FM1Updater {
     func resume(image: [UInt8], expectedProduct: String, stockLoader: Bool, beforeWriting: BeforeWriting = { _ in },
                 onStep: @escaping (InstallStep) -> Void) async throws -> ResumeOutcome {
         cancelled = false
-        guard let ota = await find({ $0.isLoader }) else { return .noLoader }
+        guard let ota = await find({ $0.isLoader }) else {
+            if cancelled { throw FM1Error.cancelled }
+            return .noLoader
+        }
         if !ota.identity.isHubLoader && !stockLoader {
             ota.link.close()
             throw FM1Error.foreign("The FM-1 is in the update mode of another firmware (\(ota.identity.text)): finish that update with its own updater.")
@@ -262,6 +270,10 @@ final class FM1Updater {
         if ota.identity.modelWithoutLoader != model {
             ota.link.close()
             throw FM1Error.model("The device in update mode is \(ota.identity.text), the package is for \(expectedProduct): nothing was written.")
+        }
+        if cancelled {
+            ota.link.close()
+            throw FM1Error.cancelled
         }
         do {
             try await beforeWriting(ota.identity)
