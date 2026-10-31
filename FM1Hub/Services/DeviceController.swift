@@ -213,7 +213,7 @@ final class DeviceController {
         guard let dev = await openDevice() else { return }
         let music = await SloopBackup.detect(FeluccaLink(link: dev.link))
         dev.link.close()
-        reportedName = music.info?.name
+        reportedName = music.info?.wholeName
         musicBackupSupported = music.kind != nil
         append("firmware says: \(music.info?.version ?? "nothing")")
         append(music.kind != nil ? "backup protocol: supported" : "backup protocol: not answered")
@@ -532,7 +532,7 @@ final class DeviceController {
         guard music.kind == nil, music.info != nil || musicBackupSupported == true else { return music }
         let again = await SloopBackup.detect(fl)
         if again.kind == nil, musicBackupSupported == true {
-            throw FM1Error.backup("The FM-1 answered the music backup when it was connected, but not now. If its firmware has changed since, press Ask again on the Device tab.")
+            throw FM1Error.backup("The FM-1 answered the music backup when it was connected, but not now. If its firmware has changed since, press Ask again on the FM-1 tab.")
         }
         return again
     }
@@ -602,7 +602,7 @@ final class DeviceController {
             phase = .searching("Loading the hub's catalogue…")
             await catalog.refresh(force: true)
         }
-        reportedName = music.info?.name
+        reportedName = music.info?.wholeName
         let who = catalog.whoIs(dev.identity.text, named: reportedName)
         let ambiguous = catalog.identityIsAmbiguous(dev.identity.text)
         let named = Firmware.named(reportedName, among: catalog.firmwares(reporting: dev.identity.text))?.product == dev.identity.text
@@ -770,6 +770,7 @@ final class DeviceController {
             // a backup recovered from a SLOOP archive alone knows no identity to hold the file to
             guard pkg.product == s.identity || !s.identity.hasPrefix("FM-1_") else { return "That file is \(pkg.product); this backup needs \(s.identity)." }
             try? packages.keep(pkg)
+            s.version = nil   // of the package this replaces, or the hub's: this file says for itself, or nothing does
             try storePackage(pkg, in: &s)
             library.update(s)
             return nil
@@ -794,7 +795,7 @@ final class DeviceController {
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .snapshot, success: true))
-            j.message = "Back on your FM-1: \(what)." + (s.hasArchive ? " Now restore the music archive from the same backup." : "")
+            j.message = "Back on your FM-1: \(what)." + (s.hasArchive && s.musicRestoresInApp ? " Now restore the music archive from the same backup." : "")
             return j
         } onFailure: { [self] e in
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: s.product ?? "", sha256: s.packageSHA256,
@@ -842,7 +843,7 @@ final class DeviceController {
         identity = dev.identity
         let fl = FeluccaLink(link: dev.link)
         let music = await SloopBackup.detect(fl)
-        reportedName = music.info?.name
+        reportedName = music.info?.wholeName
         guard music.kind == .sloop, let info = music.info else {
             dev.link.close()
             throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.name ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(catalog.firmwareName(of: s)) first, then the music.")

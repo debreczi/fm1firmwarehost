@@ -211,7 +211,7 @@ struct SnapshotDetailView: View {
         .confirmationDialog(snapshot.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {
             Button("Restore the firmware") { device.restoreFirmware(snapshot) }
             Button("Cancel", role: .cancel) {}
-        } message: { Text((unconfirmed ? "The app can't confirm this is the firmware that was on your FM-1. " : "") + "Installs the saved package. Restore the music archive afterwards, from this same backup.") }
+        } message: { Text((unconfirmed ? "The app can't confirm this is the firmware that was on your FM-1. " : "") + "Installs the saved package." + (snapshot.hasArchive && snapshot.musicRestoresInApp ? " Restore the music archive afterwards, from this same backup." : "")) }
         .confirmationDialog("Write the music archive to the FM-1?", isPresented: $confirmArchive, titleVisibility: .visible) {
             Button("Restore the music", role: .destructive) { device.restoreArchive(snapshot) }
             Button("Cancel", role: .cancel) {}

@@ -56,6 +56,11 @@ struct EditorInfo: Equatable {
     }
     var name: String { EditorInfo.ownName(of: version) }
 
+    /// The firmware sends at most 24 characters here, so one that long may be cut in the middle of its version:
+    /// "FELUCCA CoralFlower 0.6." is 0.6.1. Then it says nothing about the version, and nothing is taken from it.
+    static func wholeName(of version: String) -> String? { version.count < 24 ? ownName(of: version) : nil }
+    var wholeName: String? { EditorInfo.wholeName(of: version) }
+
     /// Backup and restore came with protocol v6 (SLOOP 2.3).
     var hasBackup: Bool { protocolVersion >= 6 }
     /// The newest project format this firmware reads: 2.6 (71 parameters) 6, 2.4 .. 2.5 (61) 5, older 4.

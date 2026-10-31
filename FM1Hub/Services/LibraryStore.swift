@@ -249,7 +249,7 @@ final class LibraryStore {
                              packageExact: pkg?.product == identity && sloop == nil,
                              archiveFile: archive != nil ? "felucca-backup.json" : sloop != nil ? SloopArchive.fileName : nil,
                              archiveBytes: archive?.totalBytes ?? sloop?.totalBytes, archiveObjects: archive?.objects.count ?? sloop?.objects.count)
-            s.reportedName = sloopName
+            s.reportedName = sloop.flatMap { EditorInfo.wholeName(of: $0.firmware) }
             s.id = id
             s.date = created
             found.append(s)

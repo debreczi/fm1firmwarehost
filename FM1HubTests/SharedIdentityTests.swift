@@ -189,6 +189,22 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertEqual(catalog().whoIs("FM-1_000")?.name, "the USB rescue mode (FM-1_000)")
     }
 
+    func testWhatTheHubAddsAfterADashIsNotInTheFirmwaresWords() {
+        let c = catalog(extra: [Self.entry("mycelium", "MYCELIUM", "1.0-test", "FM-1_900")])
+        let w = c.whoIs("FM-1_900", named: "MYCELIUM 1.0")
+        XCTAssertEqual(w?.firmware?.id, "mycelium")
+        XCTAssertEqual(w?.exact, true)
+        XCTAssertEqual(c.whoIs("FM-1_900", named: "MYCELIUM 1.0-other")?.exact, false)
+        XCTAssertEqual(c.whoIs("FM-1_900", named: "MYCELIUM 1")?.exact, false, "1 is not 1.0")
+    }
+
+    func testAFirmwareWhoseNameWasCutIsTheOwnerOfItsNumberAsOnMain() {
+        let c = catalog(extra: [Self.entry("choralroot", "ChoralRoot", "0.26.1", "FM-1_920")])
+        let said = EditorInfo.wholeName(of: "FELUCCA ChoralRoot 0.26.")
+        XCTAssertNil(said)
+        XCTAssertEqual(c.whoIs("FM-1_920", named: said)?.exact, true, "not another version")
+    }
+
     func testTheVersionAFirmwareSays() throws {
         let sloop = try XCTUnwrap(catalog().firmware(id: "sloop"))
         XCTAssertEqual(sloop.versionSaid(in: "SLOOP 2.8.3"), "2.8.3")
@@ -328,6 +344,18 @@ final class SharedIdentityTests: XCTestCase {
             XCTAssertNil(saved.packageConfirmed)
             XCTAssertNil(saved.firmwareId)
             XCTAssertNotEqual(saved.firmwareName, "Hortator", "not the first with that identity")
+        }
+    }
+
+    func testAPickedFileDropsTheVersionOfWhatItReplaces() throws {
+        let data = FWSCPackageTests.makePackage(product: "FM-1_924", payload: 1024)
+        try withController(catalog()) { device, library in
+            var s = aBackup(identity: "FM-1_924", name: "SLOOP Floyd FM")
+            s.version = "2.4"
+            s.firmwareId = "floyd"
+            library.add(s)
+            try attach(data, to: s, device: device)
+            XCTAssertNil(library.snapshots.first?.version, "it is not the hub's 2.4: its hash says so")
         }
     }
 

@@ -183,6 +183,14 @@ final class SloopBackupTests: XCTestCase {
         XCTAssertEqual(EditorInfo.ownName(of: "FELUCCA "), "FELUCCA ")
     }
 
+    func testANameCutAt24CharactersSaysNothing() {
+        // ed_str("FELUCCA " FELUCCA_VERSION, 24): CoralFlower 0.6.1 and PurpleMonkey 0.11 lose the end of their version
+        XCTAssertNil(EditorInfo.wholeName(of: "FELUCCA CoralFlower 0.6."))
+        XCTAssertNil(EditorInfo.wholeName(of: "FELUCCA PurpleMonkey 0.1"))
+        XCTAssertEqual(EditorInfo.wholeName(of: "FELUCCA SLOOP 2.8.4"), "SLOOP 2.8.4")
+        XCTAssertNil(EditorInfo(version: "FELUCCA sloopDX 4.0 BETA", paramCount: 70, protocolVersion: 9).wholeName, "exactly 24: it may be cut")
+    }
+
     func testFirmwareBeforeTheProtocolVersionByteHasNoBackup() async {
         let old = Self.aDevice()
         old.proto = nil

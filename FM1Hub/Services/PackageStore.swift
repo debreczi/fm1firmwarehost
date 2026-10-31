@@ -122,8 +122,16 @@ final class PackageStore {
         return text.range(of: pattern, options: .regularExpression) != nil
     }
 
+    /// The one build found of a version. Two different ones, like ChoralRoot's standard and 1-core packages, report the
+    /// same identity, and only the user knows which was on the device.
+    static func theOnlyBuild(of found: [FWSCPackage]) -> FWSCPackage? {
+        guard let first = found.first, found.allSatisfy({ $0.sha256 == first.sha256 }) else { return nil }
+        return first
+    }
+
     /// The release package that reports `product`, among the latest releases of the candidates' repositories; with
-    /// `version`, only that version, further back. `onStatus` names what is being tried, for the progress sheet.
+    /// `version`, only that version, further back, and only if there is one build of it. `onStatus` names what is being
+    /// tried, for the progress sheet.
     func releasePackage(product: String, candidates: [Firmware], version: String? = nil, onStatus: @escaping (String) -> Void) async -> FWSCPackage? {
         for f in candidates {
             guard let repo = f.repo, !repo.isEmpty else { continue }
@@ -142,15 +150,24 @@ final class PackageStore {
                     .sorted { ($0.name.lowercased().contains("smk") ? 1 : 0) < ($1.name.lowercased().contains("smk") ? 1 : 0) }
                 for a in fw { assets.append((r.tag_name, a)) }
             }
+            var ofThatVersion: [FWSCPackage] = []
             for (tag, a) in assets.prefix(8) {
                 guard let url = URL(string: a.browser_download_url) else { continue }
                 onStatus("Trying \(f.name) \(tag): \(a.name)…")
                 guard let data = try? await download(url, expectedSize: a.size, exactSize: a.size, onProgress: nil),
                       let p = try? FWSCPackage(data: data) else { continue }
                 if p.product == product {
+                    if version != nil {
+                        ofThatVersion.append(p)
+                        continue
+                    }
                     try? keep(p)
                     return p
                 }
+            }
+            if let p = PackageStore.theOnlyBuild(of: ofThatVersion) {
+                try? keep(p)
+                return p
             }
         }
         return nil

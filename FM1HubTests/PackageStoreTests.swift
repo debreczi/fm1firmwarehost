@@ -16,6 +16,15 @@ final class PackageStoreTests: XCTestCase {
         XCTAssertFalse(PackageStore.carries(version: "2.8.3", "2x8x3"), "a dot means a dot")
     }
 
+    func testTwoBuildsOfAVersionAreNotPickedBetween() throws {
+        let standard = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_920", payload: 1024))
+        let oneCore = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_920", payload: 2048))
+        XCTAssertEqual(PackageStore.theOnlyBuild(of: [standard])?.sha256, standard.sha256)
+        XCTAssertEqual(PackageStore.theOnlyBuild(of: [standard, standard])?.sha256, standard.sha256)
+        XCTAssertNil(PackageStore.theOnlyBuild(of: [oneCore, standard]))
+        XCTAssertNil(PackageStore.theOnlyBuild(of: []))
+    }
+
     func testACustomFirmwareOnAnOldOfficialNumberIsNotTheLatestOfficial() throws {
         let store = PackageStore.shared
         let custom = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_007", payload: 1024))

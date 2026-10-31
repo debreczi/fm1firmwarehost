@@ -118,10 +118,14 @@ struct Firmware: Codable, Identifiable, Hashable {
     static let anyIdentity = "FM-1_\\d{3,8}"
 
     /// The firmware a device's own words name, among those sharing its identity. Only name and version together count:
-    /// a firmware built on another can keep that one's name with its own base version ("SLOOP 2.4.1").
+    /// a firmware built on another can keep that one's name with its own base version ("SLOOP 2.4.1"). What the hub adds
+    /// after a dash is not in the firmware's words: the hub's MYCELIUM 1.0-test says "MYCELIUM 1.0".
     static func named(_ reported: String?, among all: [Firmware]) -> Firmware? {
         guard let said = reported?.trimmingCharacters(in: .whitespaces).lowercased(), !said.isEmpty else { return nil }
-        let hits = all.filter { "\($0.name) \($0.version)".lowercased() == said }
+        let hits = all.filter {
+            let full = "\($0.name) \($0.version)".lowercased()
+            return full == said || full.hasPrefix(said + "-")
+        }
         return hits.count == 1 ? hits[0] : nil
     }
 
