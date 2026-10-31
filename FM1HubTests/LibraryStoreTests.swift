@@ -84,6 +84,63 @@ final class LibraryStoreTests: XCTestCase {
         }
     }
 
+    func testWhatAFirmwareSaidOfItselfSurvivesAColdLaunch() {
+        withCleanLibrary {
+            var s = aSnapshot
+            s.reportedName = "SLOOP 2.8.4"
+            s.packageConfirmed = true
+            LibraryStore(folder: folder).add(s)
+            XCTAssertEqual(LibraryStore(folder: folder).snapshots, [s])
+        }
+    }
+
+    func testABackupRecordFromBeforeThoseFieldsStillReads() throws {
+        try withCleanLibrary {
+            let id = "44444444-4444-4444-4444-444444444444"
+            let dir = folder.appendingPathComponent("Snapshots/\(id)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let old = #"{"id":"\#(id)","date":"2026-10-30T08:00:00Z","name":"Old","identity":"FM-1_900","firmwareName":"Hortator","packageExact":true,"notes":""}"#
+            try Data(old.utf8).write(to: dir.appendingPathComponent("snapshot.json"))
+
+            let found = try XCTUnwrap(LibraryStore(folder: folder).snapshots.first)
+            XCTAssertEqual(found.name, "Old")
+            XCTAssertNil(found.reportedName)
+            XCTAssertNil(found.packageConfirmed, "it is not known to be the firmware that was on the device")
+        }
+    }
+
+    func testASloopBackupIsFoundAgainFromItsArchive() throws {
+        try withCleanLibrary {
+            let id = UUID()
+            let dir = folder.appendingPathComponent("Snapshots/\(id.uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: "FELUCCA SLOOP 2.8.4", date: "2026-10-31T08:00:00Z",
+                                       objects: [SloopArchiveObject(id: 1, len: 0, crc: 0, data: "")])
+            try JSONEncoder().encode(archive).write(to: dir.appendingPathComponent(SloopArchive.fileName))
+
+            let found = try XCTUnwrap(LibraryStore(folder: folder).snapshots.first)
+            XCTAssertEqual(found.id, id)
+            XCTAssertTrue(found.hasSloopArchive)
+            XCTAssertEqual(found.firmwareName, "SLOOP 2.8.4")
+            XCTAssertEqual(found.reportedName, "SLOOP 2.8.4")
+            XCTAssertEqual(found.date, ISO8601DateFormatter().date(from: archive.date))
+        }
+    }
+
+    func testAPackageBesideASloopArchiveIsNotTakenForExact() throws {
+        try withCleanLibrary {
+            let dir = folder.appendingPathComponent("Snapshots/\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let archive = SloopArchive(format: SloopArchive.formatName, version: 1, firmware: "FELUCCA SLOOP 2.8.4", date: "2026-10-31T08:00:00Z", objects: [])
+            try JSONEncoder().encode(archive).write(to: dir.appendingPathComponent(SloopArchive.fileName))
+            try FWSCPackageTests.makePackage(product: "FM-1_900").write(to: dir.appendingPathComponent("package.fwsc"))
+
+            let found = try XCTUnwrap(LibraryStore(folder: folder).snapshots.first)
+            XCTAssertEqual(found.identity, "FM-1_900")
+            XCTAssertFalse(found.packageExact)
+        }
+    }
+
     func testACorruptLibraryStillFindsItsBackups() throws {
         try withCleanLibrary {
             let store = LibraryStore(folder: folder)

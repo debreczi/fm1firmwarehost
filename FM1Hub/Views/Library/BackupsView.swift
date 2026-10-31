@@ -15,7 +15,7 @@ struct BackupsView: View {
                     intro
                     if library.snapshots.isEmpty {
                         EmptyState(icon: "externaldrive", title: "No backups yet",
-                                   text: "A backup remembers which firmware is on your FM-1 and keeps its package, so you can put it back any time. On a Felucca-family firmware it also saves your music, settings, projects and samples.")
+                                   text: "A backup remembers which firmware is on your FM-1 and keeps its package, so you can put it back any time. If several firmwares can report the same identity, you choose. On Felucca and SLOOP firmwares it also saves your music, settings, projects and samples.")
                     } else {
                         ForEach(library.snapshots) { s in
                             NavigationLink(value: s) { SnapshotCard(snapshot: s) }.buttonStyle(.plain)
@@ -29,7 +29,7 @@ struct BackupsView: View {
             .navigationDestination(for: Snapshot.self) { SnapshotDetailView(snapshot: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { name = device.whoIs?.firmware?.name ?? device.whoIs?.name ?? ""; askName = true } label: { Image(systemName: "plus.circle.fill") }
+                    Button { name = device.backupName; askName = true } label: { Image(systemName: "plus.circle.fill") }
                         .disabled(device.isBusy)
                 }
             }
@@ -56,6 +56,7 @@ struct BackupsView: View {
 
 struct SnapshotCard: View {
     @Environment(LibraryStore.self) private var library
+    @Environment(CatalogStore.self) private var catalog
     let snapshot: Snapshot
 
     var body: some View {
@@ -73,7 +74,9 @@ struct SnapshotCard: View {
                 Text(snapshot.name).font(.system(size: 16, weight: .bold, design: .rounded)).lineLimit(1)
                 Text("\(snapshot.firmwareName)\(snapshot.version.map { " \($0)" } ?? "") · \(snapshot.identity)").font(.system(size: 12, design: .rounded)).foregroundStyle(Theme.textDim).lineLimit(1)
                 HStack(spacing: 6) {
-                    if snapshot.hasPackage { Chip(text: snapshot.packageExact ? "firmware" : "firmware (hub's version)", icon: "shippingbox", tint: c) }
+                    if snapshot.hasPackage {
+                        Chip(text: catalog.packageIsUnconfirmed(in: snapshot) ? "firmware (unconfirmed)" : snapshot.packageExact ? "firmware" : "firmware (hub's version)", icon: "shippingbox", tint: c)
+                    }
                     if snapshot.hasArchive { Chip(text: "music \(ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file))", icon: "music.note", tint: Theme.ok) }
                 }
                 Text(snapshot.date.shortText).font(.system(size: 11, design: .rounded)).foregroundStyle(Theme.textFaint)
@@ -88,12 +91,24 @@ struct SnapshotCard: View {
 struct SnapshotDetailView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(DeviceController.self) private var device
+    @Environment(CatalogStore.self) private var catalog
     @Environment(\.dismiss) private var dismiss
     @State var snapshot: Snapshot
     @State private var confirmDelete = false
     @State private var confirmRestore = false
     @State private var confirmArchive = false
     @State private var editing = false
+
+    /// The firmwares this backup's identity may belong to.
+    private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
+    private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
+
+    private var musicFacts: String {
+        guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file)
+        let format = snapshot.hasSloopArchive ? "sloop-backup v1, opens in the SLOOP web editor too" : "felucca-backup v1, opens in the Felucca web editor too"
+        return "\(snapshot.archiveObjects ?? 0) objects, \(size) (\(format))"
+    }
 
     var body: some View {
         let c = snapshot.firmwareId.map { Look.colour(for: $0) } ?? Theme.accent
@@ -112,11 +127,22 @@ struct SnapshotDetailView: View {
                     if snapshot.hasPackage {
                         Button { confirmRestore = true } label: { Label("Restore the firmware", systemImage: "arrow.counterclockwise") }
                             .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
-                        if !snapshot.packageExact {
+                        if unconfirmed {
+                            Text("The app can't confirm that this package is the firmware that was on your FM-1: other firmwares can report \(snapshot.identity) too.")
+                                .font(.system(size: 12)).foregroundStyle(Theme.warn)
+                            if !sharing.isEmpty {
+                                NavigationLink { FirmwareChoiceView(snapshot: snapshot, firmwares: sharing) } label: { Label("Choose another firmware", systemImage: "list.bullet") }
+                                    .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
+                            }
+                        } else if !snapshot.packageExact {
                             Text("The FM-1 ran another version of \(snapshot.firmwareName) than the hub had (\(snapshot.identity)); the package saved is the hub's \(snapshot.version ?? "").")
                                 .font(.system(size: 12)).foregroundStyle(Theme.warn)
                         }
                     } else {
+                        if !sharing.isEmpty {
+                            NavigationLink { FirmwareChoiceView(snapshot: snapshot, firmwares: sharing) } label: { Label("Choose the firmware", systemImage: "list.bullet") }
+                                .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
+                        }
                         AttachPackageView(snapshot: $snapshot)
                     }
                     if snapshot.hasArchive {
@@ -144,7 +170,7 @@ struct SnapshotDetailView: View {
                             FactRow(label: "SHA-256", value: snapshot.packageSHA256 ?? "", mono: true)
                         }
                         Divider().overlay(Theme.stroke)
-                        FactRow(label: "Music", value: snapshot.hasArchive ? "\(snapshot.archiveObjects ?? 0) objects, \(ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file)) (felucca-backup v1, opens in the Felucca web editor too)" : "none (this firmware has no backup over USB)")
+                        FactRow(label: "Music", value: musicFacts)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 6).card()
                 }
@@ -164,6 +190,10 @@ struct SnapshotDetailView: View {
         .hubBackground()
         .navigationTitle("Backup")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: library.snapshots) { _, all in
+            // a package chosen for this backup arrives through the library
+            if let fresh = all.first(where: { $0.id == snapshot.id }), fresh != snapshot { snapshot = fresh }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { Button("Rename") { editing = true } }
         }
@@ -172,14 +202,14 @@ struct SnapshotDetailView: View {
             Button("Save") { library.update(snapshot) }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {
+        .confirmationDialog(snapshot.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {
             Button("Restore the firmware") { device.restoreFirmware(snapshot) }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("Installs the saved package. Restore the music archive afterwards, from this same backup.") }
+        } message: { Text((unconfirmed ? "The app can't confirm this is the firmware that was on your FM-1. " : "") + "Installs the saved package. Restore the music archive afterwards, from this same backup.") }
         .confirmationDialog("Write the music archive to the FM-1?", isPresented: $confirmArchive, titleVisibility: .visible) {
             Button("Restore the music", role: .destructive) { device.restoreArchive(snapshot) }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("Replaces the current music, settings, projects, user banks and samples on the FM-1 with the archive. The FM-1 must run a Felucca-family firmware, best \(snapshot.firmwareName), and be stopped.") }
+        } message: { Text("Replaces the current music, settings, projects, user banks and samples on the FM-1 with the archive. The FM-1 must run a \(snapshot.hasSloopArchive ? "SLOOP" : "Felucca-family") firmware, best \(snapshot.firmwareName), and be stopped.") }
         .confirmationDialog("Delete this backup?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { library.remove(snapshot); dismiss() }
             Button("Cancel", role: .cancel) {}
@@ -187,6 +217,48 @@ struct SnapshotDetailView: View {
     }
 }
 
+
+/// This backup's identity can't name its firmware and the device did not say, so the user chooses. The package comes from
+/// the hub, checked against the catalogue.
+struct FirmwareChoiceView: View {
+    @Environment(LibraryStore.self) private var library
+    @Environment(DeviceController.self) private var device
+    @Environment(\.dismiss) private var dismiss
+    let snapshot: Snapshot
+    let firmwares: [Firmware]
+
+    var body: some View {
+        // installed with this app before this backup was made: a later install says nothing about what was on it then
+        let last = library.history.first { $0.success && $0.identityAfter == snapshot.identity && $0.date <= snapshot.date }?.firmwareId
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Several firmwares can report \(snapshot.identity). Choose the one that was on your FM-1 when you made this backup, and its package from the hub goes into it.")
+                    .font(.system(size: 14)).foregroundStyle(Theme.textDim)
+                if let said = snapshot.reportedName {
+                    Text("It called itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
+                }
+                ForEach(Firmware.likeliestFirst(firmwares, reported: snapshot.reportedName, lastInstalled: last)) { f in
+                    Button { device.attachFirmware(f, to: snapshot); dismiss() } label: {
+                        HStack(spacing: 12) {
+                            HubImage(url: f.imageURL, tint: Look.colour(for: f.id)).frame(width: 56, height: 44).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(f.name) \(f.version)").font(.system(size: 15, weight: .semibold, design: .rounded)).lineLimit(1)
+                                Text("by \(f.author)").font(.system(size: 12, design: .rounded)).foregroundStyle(Theme.textDim).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(10).card()
+                    }
+                    .buttonStyle(.plain).disabled(device.isBusy)
+                }
+            }
+            .padding(16)
+        }
+        .hubBackground()
+        .navigationTitle("Which firmware?")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
 
 /// A backup the app could not complete on its own: the package is nowhere it knows to look. The last resort is a
 /// .fwsc from Files; everything else was tried automatically.

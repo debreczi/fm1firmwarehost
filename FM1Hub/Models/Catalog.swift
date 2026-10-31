@@ -113,6 +113,33 @@ struct Firmware: Codable, Identifiable, Hashable {
     /// The number after "FM-1_", as text.
     var productDigits: Substring { product.split(separator: "_").last ?? "" }
     var searchText: String { [name, author, what, version, kinds.joined(separator: " "), product].joined(separator: " ").lowercased() }
+
+    /// The "ident" pattern of a firmware that says nothing about the identities it reports.
+    static let anyIdentity = "FM-1_\\d{3,8}"
+
+    /// The firmware a device's own words name, among those sharing its identity. Only name and version together count:
+    /// a firmware built on another can keep that one's name with its own base version ("SLOOP 2.4.1").
+    static func named(_ reported: String?, among all: [Firmware]) -> Firmware? {
+        guard let said = reported?.trimmingCharacters(in: .whitespaces).lowercased(), !said.isEmpty else { return nil }
+        let hits = all.filter { "\($0.name) \($0.version)".lowercased() == said }
+        return hits.count == 1 ? hits[0] : nil
+    }
+
+    /// Those sharing an identity, the likeliest first: the one whose name the device used, the one last installed with
+    /// this app, then the most installed.
+    static func likeliestFirst(_ all: [Firmware], reported: String?, lastInstalled: String?) -> [Firmware] {
+        let said = reported?.lowercased() ?? ""
+        func rank(_ f: Firmware) -> Int {
+            if !said.isEmpty, said.hasPrefix(f.name.lowercased()) { return 0 }
+            return f.id == lastInstalled ? 1 : 2
+        }
+        return all.sorted {
+            let (a, b) = (rank($0), rank($1))
+            if a != b { return a < b }
+            if ($0.installs ?? 0) != ($1.installs ?? 0) { return ($0.installs ?? 0) > ($1.installs ?? 0) }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
 }
 
 /// M-VAVE's official V15 as the hub serves it (catalog.json "stock").

@@ -11,7 +11,7 @@ struct FirmwareDetailView: View {
 
     var body: some View {
         let c = Look.colour(for: firmware.id)
-        let onDevice = device.identity?.text == firmware.product
+        let onDevice = device.isRunning(firmware)
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HubImage(url: firmware.imageURL, tint: c, wide: Look.wide.contains(firmware.id))
@@ -115,7 +115,7 @@ struct FirmwareDetailView: View {
             Button("Install") { device.install(firmware) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text((device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca-family firmware is backed up first when that setting is on.")
+            Text((device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca or SLOOP firmware is backed up first when that setting is on.")
         }
     }
 

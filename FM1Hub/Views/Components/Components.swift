@@ -117,14 +117,13 @@ struct LinkRow: View {
 /// The identity pill: "On your FM-1: Felucca 1.6.1".
 struct DevicePill: View {
     @Environment(DeviceController.self) private var device
-    @Environment(CatalogStore.self) private var catalog
 
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(device.isConnected ? Theme.ok : Theme.textFaint).frame(width: 8, height: 8)
                 .shadow(color: device.isConnected ? Theme.ok.opacity(0.8) : .clear, radius: 4)
             if let id = device.identity {
-                let w = catalog.whoIs(id.text)
+                let w = device.whoIs
                 Text("On your FM-1: ").foregroundStyle(Theme.textDim) +
                 Text(w?.firmware?.name ?? w?.name ?? id.text).fontWeight(.semibold) +
                 Text(w?.firmware != nil ? (w?.exact == true ? " \(w!.firmware!.version)" : " (another version: \(id.text))") : "").foregroundStyle(Theme.textDim)

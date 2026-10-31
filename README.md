@@ -14,7 +14,7 @@ Files app, so you can copy them to iCloud Drive or a computer).
 | **Firmwares** | Live catalogue from `thefirmwarehub.com/catalog.json` (cached for offline). Cards with the firmware's own screen, maker, version, kind tags, beta badge, installs/stars, description. Search, type/style filters (synths, grooveboxes, drums & samplers, chords, trackers, dev, ambient, vintage), sort (installs, newest, added, name, stars), list or grid. Detail page with a facts table (release date, identity, size, SHA-256, licence, your installs) and links (project, release, source, editor, play in browser, cheat sheet, feedback). |
 | **Official firmware** | One tap for M-VAVE's current release (fetched from their download server, identity read from the file, so a new official version appears without an app update) and one tap for the V15 recovery image the hub keeps. |
 | **Install** | The same two-step USB-MIDI update protocol the hub and M-VAVE's updater use: handshake, step 1 (the running firmware stages the loader), step 2 (the loader writes the image), restart, identity check. Packages are checked against the catalogue (size, SHA-256, package identity) before a byte is written. Resumes an interrupted update when the FM-1 is left in update mode. Back to the official V15 (exact file only). Install a `.fwsc` from the Files app (GitHub release, or M-VAVE's own file). |
-| **Backups** | A backup saves which firmware is on the FM-1 and keeps its package so it can be put back later, one tap. The package is found automatically: the hub's catalogue, then the phone (every package the app ever installed is kept, about 0.6 MB each), then the maker's GitHub releases for that firmware family (a release the hub has not synced yet), then M-VAVE's server for official versions. On Felucca-family firmwares (Felucca and everything built on it: Melodee, X0X, Ghoulbox, Jangada, Hortator, Salt, ChoralRoot, …) it also reads the **music archive** over USB: current music, settings, projects A–D, user banks, FM6 patches, sample slots. Restore the firmware, restore the archive. The archive file is the Felucca editor's own `felucca-backup` v1 JSON, so it opens there too. Optional automatic backup before every install. |
+| **Backups** | A backup saves which firmware is on the FM-1 and keeps its package so it can be put back later, one tap. The package is found automatically: the hub's catalogue, then the phone (every package the app ever installed is kept, about 0.6 MB each), then the maker's GitHub releases for that firmware family (a release the hub has not synced yet), then M-VAVE's server for official versions. On Felucca-family firmwares (Felucca and everything built on it: Melodee, X0X, Ghoulbox, Jangada, Hortator, Salt, ChoralRoot, …) and on SLOOP and the firmwares built on it, it also reads the **music archive** over USB: current music, settings, projects, user banks, FM6 patches, sample slots. Restore the firmware, restore the archive. The archive file is the firmware editor's own (`felucca-backup` or `sloop-backup` v1 JSON), so it opens there too. Many firmwares report the same identity: when the firmware can't name itself, you choose it in the backup. Optional automatic backup before every install. |
 | **History** | Every install: what, when, from where (hub, backup, file, official), identity before and after, success or the error. |
 | **Device** | Connect / identify, MIDI port list with "this is my FM-1" for firmwares that name their port after themselves, resume card when a loader is waiting, log. |
 
@@ -92,6 +92,7 @@ FM1Hub/
                   FM1Protocol.swift          handshake / identity / read-request framing
                   FM1Updater.swift           find, serve, install, resume
                   FeluccaBackup.swift        Felucca editor backup protocol (LIST/GET/PUT, samples)
+                  SloopBackup.swift          SLOOP editor backup protocol (INFO, BK_LIST/GET/PUT, samples)
   MIDI/           MIDIEngine.swift           CoreMIDI client, UMP SysEx7 in/out
                   MIDILink.swift             one in/out pair with a SysEx queue
                   SysexQueue.swift
@@ -102,16 +103,21 @@ FM1Hub/
 Where things are kept on the phone (Files › On My iPhone › FM-1 Hub):
 
 - `Packages/` downloaded `.fwsc` files, named `id-version-sha8.fwsc`
-- `Snapshots/<uuid>/package.fwsc` and `felucca-backup.json`
+- `Snapshots/<uuid>/package.fwsc` and `felucca-backup.json` or `sloop-backup.json`
 - `library.json` history and snapshot index
 
 ## Protocol notes
 
 The FM-1 does not read its own flash back over MIDI: an update is the device *pulling* a package from the host
 (cmd `0x30` read requests on the logical image, answered with 7-bit packed data). A "firmware backup" is therefore the
-exact package by SHA-256, which the app stores. Music and settings are a different protocol, offered only by Felucca-
-family firmwares (`F0 7D 46 4C …`), which the app speaks when the device answers `BACKUP_LIST`. Other firmwares have
-their own editors and backup tools; the app says so instead of pretending.
+exact package by SHA-256, which the app stores. Music and settings are a different protocol, offered by Felucca-family
+firmwares and by SLOOP and the firmwares built on it (`F0 7D 46 4C …`, with different command numbers and file formats),
+which the app speaks when the device answers its `BACKUP_LIST`. Other firmwares have their own editors and backup tools;
+the app says so instead of pretending.
+
+Many firmwares report the same identity (`FM-1_900` has more than twenty), so the identity alone cannot say which one is
+running. The app asks the firmware's `INFO` and accepts only a name and version that match the hub's catalogue exactly.
+Otherwise it looks for no package and the user chooses the firmware, in the backup.
 
 ## Licence
 

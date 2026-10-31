@@ -91,7 +91,7 @@ struct PendingUpdate: Codable, Hashable {
     }
 }
 
-/// A saved state of the FM-1: which firmware was on it, the exact package to put it back, and (for Felucca-family
+/// A saved state of the FM-1: which firmware was on it, the exact package to put it back, and (for Felucca and SLOOP
 /// firmwares) an archive of the music, settings, projects and samples.
 struct Snapshot: Codable, Identifiable, Hashable {
     var id = UUID()
@@ -106,11 +106,14 @@ struct Snapshot: Codable, Identifiable, Hashable {
     var packageSHA256: String?
     var packageSize: Int?
     var packageExact: Bool              // the package is known to be the very version that was on the device
-    var archiveFile: String?            // "felucca-backup.json", relative to the snapshot folder
+    var archiveFile: String?            // "felucca-backup.json" or "sloop-backup.json", relative to the snapshot folder
     var archiveBytes: Int?
     var archiveObjects: Int?
     var notes: String = ""
+    var reportedName: String? = nil     // what the firmware said of itself, "SLOOP 2.8.4"
+    var packageConfirmed: Bool? = nil   // several firmwares share the identity, and the device itself named this one
 
     var hasPackage: Bool { packageFile != nil }
     var hasArchive: Bool { archiveFile != nil }
+    var hasSloopArchive: Bool { archiveFile == SloopArchive.fileName }
 }
