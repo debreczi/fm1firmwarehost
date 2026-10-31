@@ -606,13 +606,16 @@ final class DeviceController {
         if catalog.firmwares.isEmpty {
             phase = .searching("Loading the hub's catalogue…")
             await catalog.refresh(force: true)
+            // that returns at once when the launch's own refresh is on its way, which a timeout ends
+            while catalog.loading, !Task.isCancelled { try? await Task.sleep(nanoseconds: 200_000_000) }
         }
         reportedName = music.info?.wholeName
         let who = catalog.whoIs(dev.identity.text, named: reportedName)
         let ambiguous = catalog.identityIsAmbiguous(dev.identity.text)
         let named = Firmware.named(reportedName, among: catalog.firmwares(reporting: dev.identity.text))?.product == dev.identity.text
         var s = Snapshot(name: name ?? prefix + whoIsName(dev.identity), identity: dev.identity.text, firmwareId: who?.firmware?.id,
-                         firmwareName: who?.firmware?.name ?? who?.name ?? dev.identity.text,
+                         // without a catalogue the identity itself, which is named once there is one
+                         firmwareName: catalog.firmwares.isEmpty ? dev.identity.text : who?.firmware?.name ?? who?.name ?? dev.identity.text,
                          version: who?.exact == true ? who?.firmware?.version : nil, product: nil, packageFile: nil,
                          packageSHA256: nil, packageSize: nil, packageExact: false, archiveFile: nil, archiveBytes: nil, archiveObjects: nil)
         s.reportedName = reportedName

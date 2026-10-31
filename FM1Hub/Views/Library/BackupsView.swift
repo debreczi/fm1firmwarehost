@@ -100,7 +100,7 @@ struct SnapshotDetailView: View {
     @State private var editing = false
 
     /// The firmwares this backup's identity may belong to.
-    private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity).filter { !$0.needsOwnInstaller } }
+    private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
     private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
     /// The firmware of this backup, when its package alone can't put it back.
     private var ownInstaller: Firmware? { snapshot.firmwareId.flatMap { catalog.firmware(id: $0) }.flatMap { $0.needsOwnInstaller ? $0 : nil } }
@@ -243,14 +243,15 @@ struct FirmwareChoiceView: View {
     var body: some View {
         // installed with this app before this backup was made: a later install says nothing about what was on it then
         let last = library.history.first { $0.success && $0.identityAfter == snapshot.identity && $0.date <= snapshot.date }?.firmwareId
+        let choices = firmwares.filter { !$0.needsOwnInstaller }
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(firmwares.count > 1 ? "Several firmwares" : firmwares[0].name) can report \(snapshot.identity). Choose what was on your FM-1 when you made this backup, and the hub's package of it goes into the backup. The hub keeps only each firmware's newest version.")
+                Text("\(firmwares.count > 1 ? "Several firmwares" : firmwares.first?.name ?? "A firmware") can report \(snapshot.identity). Choose what was on your FM-1 when you made this backup, and the hub's package of it goes into the backup. The hub keeps only each firmware's newest version.")
                     .font(.system(size: 14)).foregroundStyle(Theme.textDim)
                 if let said = snapshot.reportedName, !Firmware.saidName(said, among: firmwares, identity: snapshot.identity).isEmpty {
                     Text("It called itself “\(said)”.").font(.system(size: 14, weight: .semibold, design: .rounded))
                 }
-                ForEach(Firmware.likeliestFirst(firmwares, identity: snapshot.identity, reported: snapshot.reportedName, lastInstalled: last)) { f in
+                ForEach(Firmware.likeliestFirst(choices, identity: snapshot.identity, reported: snapshot.reportedName, lastInstalled: last)) { f in
                     Button { device.attachFirmware(f, to: snapshot); dismiss() } label: {
                         HStack(spacing: 12) {
                             HubImage(url: f.imageURL, tint: Look.colour(for: f.id)).frame(width: 56, height: 44).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -263,6 +264,13 @@ struct FirmwareChoiceView: View {
                         .padding(10).card()
                     }
                     .buttonStyle(.plain).disabled(device.isBusy)
+                }
+                // no package of theirs can be chosen, as it is not all of them: their maker's page puts them back
+                ForEach(firmwares.filter(\.needsOwnInstaller)) { f in
+                    if let u = f.install.flatMap(URL.init) {
+                        Link(destination: u) { Label("\(f.name): installed by its maker's own page", systemImage: "arrow.up.right.square") }
+                            .font(.system(size: 13))
+                    }
                 }
             }
             .padding(16)
