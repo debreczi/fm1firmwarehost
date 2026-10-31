@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(DeviceController.self) private var device
     @Environment(CatalogStore.self) private var catalog
+    @Environment(AppSettings.self) private var settings
     @State private var tab = Demo.isOn ? Demo.tab : 0
 
     var body: some View {
@@ -23,6 +24,9 @@ struct RootView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(4)
+        }
+        .fullScreenCover(isPresented: Binding(get: { !settings.disclaimerAccepted }, set: { _ in })) {
+            DisclaimerView()
         }
         .sheet(isPresented: $device.showJobSheet) {
             JobSheet()
