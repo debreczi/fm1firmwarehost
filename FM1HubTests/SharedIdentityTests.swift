@@ -220,6 +220,7 @@ final class SharedIdentityTests: XCTestCase {
             let saved = try XCTUnwrap(library.snapshots.first)
             XCTAssertTrue(saved.hasPackage)
             XCTAssertFalse(saved.packageExact)
+            XCTAssertEqual(saved.firmwareName, "SLOOP 2.8.4", "not the first firmware with the package's identity")
         }
     }
 

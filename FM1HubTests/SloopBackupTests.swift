@@ -350,8 +350,11 @@ final class SloopBackupTests: XCTestCase {
 
     func testASampleFailureSaysWhatItIs() async throws {
         let archive = try await capture(Self.aDevice())
-        for (cmd, rc, words) in [(UInt8(12), UInt8(3), "could not be written"), (12, 2, "could not be erased"), (12, 4, "was not open"),
-                                 (13, 3, "failed its data check"), (13, 4, "could not be written"), (13, 5, "not a valid sample"), (11, 1, "could not be erased")] {
+        let failures: [(UInt8, UInt8, String)] = [
+            (12, 3, "could not be written"), (12, 2, "could not be erased"), (12, 4, "was not open"), (13, 3, "failed its data check"),
+            (13, 4, "could not be written"), (13, 5, "not a valid sample"), (11, 1, "could not be erased")
+        ]
+        for (cmd, rc, words) in failures {
             let device = Self.aDevice()
             device.sampleFails = (cmd, rc)
             do {

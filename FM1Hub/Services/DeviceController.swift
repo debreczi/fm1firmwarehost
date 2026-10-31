@@ -680,7 +680,7 @@ final class DeviceController {
         let folder = library.folder(for: s)
         Paths.ensure(folder)
         try Data(pkg.bytes).write(to: folder.appendingPathComponent("package.fwsc"), options: .atomic)
-        let ambiguous = catalog.identityIsAmbiguous(s.identity)
+        let ambiguous = catalog.identityIsAmbiguous(s.identity) || catalog.identityIsAmbiguous(pkg.product)
         let hadPackage = s.hasPackage
         s.packageFile = "package.fwsc"
         s.packageSHA256 = pkg.sha256
@@ -690,7 +690,11 @@ final class DeviceController {
         s.packageConfirmed = confirmed ? true : nil
         if let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
         else if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { s.version = f.version; s.firmwareId = f.id; s.firmwareName = f.name }
-        else if ambiguous { s.version = nil; s.firmwareId = nil; s.firmwareName = catalog.whoIs(s.identity)?.name ?? s.identity }
+        else if ambiguous {
+            s.version = nil
+            s.firmwareId = nil
+            if s.identity.hasPrefix("FM-1_") { s.firmwareName = catalog.whoIs(s.identity)?.name ?? s.identity }
+        }
         else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
         if !hadPackage { s.notes = "" }   // the app's own word on why there was none; after that the notes are the user's
     }
