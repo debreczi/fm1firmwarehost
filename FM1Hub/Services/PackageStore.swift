@@ -116,10 +116,17 @@ final class PackageStore {
         let assets: [Asset]
     }
 
-    /// Does this release tag or file name carry exactly this version? 2.8 is not 2.8.4.
+    /// Does this release tag or file name carry exactly this version? 2.8 is not 2.8.4, and the 1 of sid1 is no version.
     static func carries(version: String, _ text: String) -> Bool {
-        let pattern = "(?<![0-9.])" + NSRegularExpression.escapedPattern(for: version) + "(?![0-9]|\\.[0-9])"
+        let pattern = "(?<![0-9A-Za-z.])[vV]?" + NSRegularExpression.escapedPattern(for: version) + "(?![0-9]|\\.[0-9])"
         return text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Is this file of that release this version? A whole number can be part of any name ("zen-1-1.2.fwsc"), so that
+    /// has to be the release's whole tag.
+    static func isVersion(_ version: String, tag: String, asset: String) -> Bool {
+        if !version.contains(".") { return [version, "v" + version].contains(tag.lowercased()) }
+        return carries(version: version, tag) || carries(version: version, asset)
     }
 
     /// The one build found of a version. Two different ones, like ChoralRoot's standard and 1-core packages, report the
@@ -146,7 +153,7 @@ final class PackageStore {
             var assets: [(String, Release.Asset)] = []
             for r in releases {
                 let fw = r.assets.filter { $0.name.lowercased().hasSuffix(".fwsc") && $0.size > 100_000 && $0.size < 4_000_000 }
-                    .filter { a in version.map { PackageStore.carries(version: $0, r.tag_name) || PackageStore.carries(version: $0, a.name) } ?? true }
+                    .filter { a in version.map { PackageStore.isVersion($0, tag: r.tag_name, asset: a.name) } ?? true }
                     .sorted { ($0.name.lowercased().contains("smk") ? 1 : 0) < ($1.name.lowercased().contains("smk") ? 1 : 0) }
                 for a in fw { assets.append((r.tag_name, a)) }
             }

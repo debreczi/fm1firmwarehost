@@ -98,6 +98,7 @@ struct SnapshotDetailView: View {
     @State private var confirmRestore = false
     @State private var confirmArchive = false
     @State private var editing = false
+    @State private var newName = ""
 
     /// The firmwares this backup's identity may belong to.
     private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
@@ -210,11 +211,11 @@ struct SnapshotDetailView: View {
             if let fresh = all.first(where: { $0.id == snapshot.id }), fresh != snapshot { snapshot = fresh }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button("Rename") { editing = true } }
+            ToolbarItem(placement: .topBarTrailing) { Button("Rename") { newName = snapshot.name; editing = true } }
         }
         .alert("Rename", isPresented: $editing) {
-            TextField("Name", text: $snapshot.name)
-            Button("Save") { library.update(snapshot) }
+            TextField("Name", text: $newName)
+            Button("Save") { snapshot.name = newName; library.update(snapshot) }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(snapshot.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {

@@ -14,6 +14,17 @@ final class PackageStoreTests: XCTestCase {
         XCTAssertFalse(PackageStore.carries(version: "8.4", "v2.8.4"))
         XCTAssertFalse(PackageStore.carries(version: "2.8.3", "sloop-2.8.31.fwsc"))
         XCTAssertFalse(PackageStore.carries(version: "2.8.3", "2x8x3"), "a dot means a dot")
+        XCTAssertFalse(PackageStore.carries(version: "1", "sid1"), "part of a name")
+    }
+
+    func testAWholeNumberVersionMustBeTheWholeTag() {
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.0", asset: "sid1-1.0.0.fwsc"))
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "1.2", asset: "zen-1-1.2.fwsc"))
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.1", asset: "mnm1-1.0.1.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("39", tag: "v39", asset: "quest.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("39", tag: "V39", asset: "quest.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("2.8.3", tag: "other", asset: "sloop-2.8.3.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("2.8.3", tag: "v2.8.3", asset: "sloop.fwsc"))
     }
 
     func testTwoBuildsOfAVersionAreNotPickedBetween() throws {

@@ -659,6 +659,7 @@ final class DeviceController {
         if Task.isCancelled { throw FM1Error.cancelled }   // not "no package found", which is what a cancelled search looks like
         if let (pkg, from) = found {
             try storePackage(pkg, in: &s, confirmed: named && from == "hub")
+            if let f = who?.firmware, f.needsOwnInstaller { s.ownInstaller = f.install }
             // its maker's release of the version it named: the right file, unless a fork kept the name, version and number
             if from == DeviceController.namedRelease, let f = who?.firmware {
                 s.firmwareId = f.id
