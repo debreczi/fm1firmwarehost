@@ -3,7 +3,6 @@ import UniformTypeIdentifiers
 
 struct DeviceView: View {
     @Environment(DeviceController.self) private var device
-    @Environment(CatalogStore.self) private var catalog
     @Environment(LibraryStore.self) private var library
     @Environment(AppSettings.self) private var settings
     @State private var importing = false
@@ -104,14 +103,17 @@ struct DeviceView: View {
     }
 
     private var resumeCard: some View {
-        let last = library.lastInstalled
-        let f = last?.firmwareId.flatMap { catalog.firmware(id: $0) }
-        return VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             Label("The FM-1 is in update mode", systemImage: "exclamationmark.triangle.fill").font(.system(size: 16, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
-            Text("An update was interrupted (\(device.loaderWaiting?.text ?? "")). Installing any firmware from the list continues from here. Or write the last one again:")
-                .font(.system(size: 13)).foregroundStyle(Theme.textDim)
-            Button { device.resume() } label: { Label("Resume: \(f?.name ?? (last?.name ?? "the last firmware"))", systemImage: "arrow.clockwise") }
-                .buttonStyle(PrimaryButtonStyle(tint: Theme.warn)).disabled(device.isBusy)
+            if let p = library.pending {
+                Text("The update to \(p.name)\(p.version.isEmpty ? "" : " \(p.version)") was interrupted (\(device.loaderWaiting?.text ?? "")). Installing any firmware from the list continues from here. Or write that same package again:")
+                    .font(.system(size: 13)).foregroundStyle(Theme.textDim)
+                Button { device.resume() } label: { Label("Resume: \(p.name)", systemImage: "arrow.clockwise") }
+                    .buttonStyle(PrimaryButtonStyle(tint: Theme.warn)).disabled(device.isBusy)
+            } else {
+                Text("An update was interrupted (\(device.loaderWaiting?.text ?? "")), but this app does not know which package was being written — it was another updater, or an older version of this app. Install any firmware from the list: that continues from here.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.textDim)
+            }
         }
         .padding(16).card(tint: Theme.warn)
     }

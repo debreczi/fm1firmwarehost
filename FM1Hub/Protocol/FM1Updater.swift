@@ -159,8 +159,15 @@ final class FM1Updater {
         }
     }
 
+    /// Called at the point of no return: the device this attempt found has been checked, and the next thing that
+    /// happens is a write. The identity handed over is that device's own, so a caller recording what it is about to
+    /// do records something it has just seen rather than something it remembers. Throwing aborts the attempt with
+    /// nothing written.
+    typealias BeforeWriting = @MainActor (FM1Identity) throws -> Void
+
     /// Full install: running firmware -> loader -> new firmware. Returns the identity the device reports after.
-    func install(image: [UInt8], product: String, onStep: @escaping (InstallStep) -> Void) async throws -> String {
+    func install(image: [UInt8], product: String, beforeWriting: BeforeWriting = { _ in },
+                 onStep: @escaping (InstallStep) -> Void) async throws -> String {
         cancelled = false
         guard let dev = await find({ !$0.isLoader }) else {
             throw FM1Error.notFound("FM-1 not found (USB cable, and no other app using it?)" + seen())
@@ -169,6 +176,12 @@ final class FM1Updater {
         if dev.identity.model != model {
             dev.link.close()
             throw FM1Error.model("The device is \(dev.identity.text), the package is for \(product).")
+        }
+        do {
+            try await beforeWriting(dev.identity)
+        } catch {
+            dev.link.close()
+            throw error
         }
         onStep(.start(dev.identity.text))
         dev.link.send(FM1Protocol.upgrade)
@@ -225,38 +238,52 @@ final class FM1Updater {
         return try await serve(ota.link, image: image, finish: FM1Protocol.finishStep2, idleMs: 180000) { onStep(.write($0)) }
     }
 
-    /// Resume: the device is already in update mode (loader). True when the write finished, false when no loader
-    /// answers. Only the hub's own loader is resumed, except for a package of the official family (stockProduct set):
-    /// that one is the official loader's own image, as M-UPGRADE would write it.
-    func resume(image: [UInt8], stockProduct: String?, onStep: @escaping (InstallStep) -> Void) async throws -> Bool {
+    /// How far a resume got. The caller needs to tell `noLoader` from `interrupted`: the first means not a byte was
+    /// sent and the device was never touched, the second means the write had begun.
+    enum ResumeOutcome: Equatable {
+        case noLoader
+        case interrupted
+        case written(String)
+    }
+
+    /// Resume: the device is already in update mode (loader). `expectedProduct` is the identity the package carries
+    /// and is always verified against the restarted device. `stockLoader` says whose loader may be resumed: by
+    /// default only the hub's own, because another firmware's loader may lay the image out differently; a package of
+    /// the official family is written from the official loader, as M-UPGRADE would.
+    func resume(image: [UInt8], expectedProduct: String, stockLoader: Bool, beforeWriting: BeforeWriting = { _ in },
+                onStep: @escaping (InstallStep) -> Void) async throws -> ResumeOutcome {
         cancelled = false
-        guard let ota = await find({ $0.isLoader }) else { return false }
-        if !ota.identity.isHubLoader && stockProduct == nil {
+        guard let ota = await find({ $0.isLoader }) else { return .noLoader }
+        if !ota.identity.isHubLoader && !stockLoader {
             ota.link.close()
             throw FM1Error.foreign("The FM-1 is in the update mode of another firmware (\(ota.identity.text)): finish that update with its own updater.")
         }
-        let model = (stockProduct ?? "FM-1_").split(separator: "_").first.map(String.init) ?? "FM-1"
+        let model = expectedProduct.split(separator: "_").first.map(String.init) ?? expectedProduct
         if ota.identity.modelWithoutLoader != model {
             ota.link.close()
-            throw FM1Error.model("The device in update mode is \(ota.identity.text), the package is for \(stockProduct ?? "the FM-1"): nothing was written.")
+            throw FM1Error.model("The device in update mode is \(ota.identity.text), the package is for \(expectedProduct): nothing was written.")
+        }
+        do {
+            try await beforeWriting(ota.identity)
+        } catch {
+            ota.link.close()
+            throw error
         }
         let s2 = try await write(ota, image: image, onStep: onStep)
-        if !s2.finished { return false }
-        if let product = stockProduct {
-            onStep(.reboot)
-            await sleep(ms: 3000)
-            guard let back = await waitFor({ !$0.isLoader }, ms: 40000) else {
-                throw FM1Error.noReturn("The FM-1 did not come back after the write: power-cycle it.")
-            }
-            back.link.close()
-            if back.identity.text != product {
-                throw FM1Error.mismatch("Written, but the FM-1 reports \(back.identity.text).")
-            }
-            onStep(.done(back.identity.text))
-        } else {
-            onStep(.done(""))
+        if !s2.finished { return .interrupted }
+        // Every package, not only the official ones: a write counts as finished when the device comes back and says
+        // what it is. Reporting success without asking would let a device still stuck in the loader look recovered.
+        onStep(.reboot)
+        await sleep(ms: 3000)
+        guard let back = await waitFor({ !$0.isLoader }, ms: 40000) else {
+            throw FM1Error.noReturn("The FM-1 did not come back after the write: power-cycle it.")
         }
-        return true
+        back.link.close()
+        if back.identity.text != expectedProduct {
+            throw FM1Error.mismatch("Written, but the FM-1 reports \(back.identity.text).")
+        }
+        onStep(.done(back.identity.text))
+        return .written(back.identity.text)
     }
 
     /// Is a loader waiting (an interrupted update)?

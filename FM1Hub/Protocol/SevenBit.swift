@@ -148,6 +148,16 @@ enum FM1Error: LocalizedError {
         }
     }
 
+    /// True only for the failures the device layer raises before a single byte has gone to the device: no FM-1
+    /// answered, it is another model, or it is in another firmware's loader. Everything else is either raised
+    /// mid-write or cannot be told apart from one, so it counts as "the device may have been touched".
+    var nothingWritten: Bool {
+        switch self {
+        case .notFound, .model, .foreign, .package, .midi: return true
+        case .stopped, .lost, .noLoader, .noReturn, .mismatch, .badRequest, .protocolError, .cancelled: return false
+        }
+    }
+
     /// What to do next, as the hub says it.
     var hint: String {
         switch self {
