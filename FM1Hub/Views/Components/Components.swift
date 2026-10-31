@@ -57,6 +57,29 @@ struct SectionHeader: View {
     }
 }
 
+/// Said out loud when the history and backup list could not be read or written: an empty list that is only empty
+/// because of a file error must never look like an empty list that is simply empty.
+struct LibraryProblemCard: View {
+    let notice: LibraryNotice
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(notice.kind == .rescue ? "The saved list could not be read" : "The saved list could not be written",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(Theme.warn)
+            Text(notice.text).font(.system(size: 13)).foregroundStyle(Theme.textDim)
+            if notice.dismissible {
+                Button("I have the file, put this away", action: onDismiss)
+                    .buttonStyle(.bordered).controlSize(.small).font(.system(size: 12))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .card(tint: Theme.warn)
+    }
+}
+
 struct EmptyState: View {
     let icon: String
     let title: String

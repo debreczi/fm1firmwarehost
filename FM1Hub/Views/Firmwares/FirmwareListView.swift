@@ -42,7 +42,6 @@ struct FirmwareListView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(spacing: 14) {
-                    if !settings.disclaimerAccepted { DisclaimerBox() }
                     header
                     if catalog.firmwares.isEmpty {
                         if catalog.loading { ProgressView("Loading the catalogue…").padding(40) }
@@ -195,29 +194,3 @@ struct FirmwareTile: View {
     }
 }
 
-
-/// The first-launch warning: shown on the Firmwares page until the user accepts it once.
-struct DisclaimerBox: View {
-    @Environment(AppSettings.self) private var settings
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Use at your own risk", systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-            Text("Installing firmware can break your FM-1. The makers of this app take no responsibility for what happens to your device, and are not associated with M-VAVE or The FM-1 Firmware Hub.")
-                .font(.system(size: 14))
-                .fixedSize(horizontal: false, vertical: true)
-            Text("By tapping the button below, you acknowledge that using this app might break your FM-1.")
-                .font(.system(size: 14, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
-            Button {
-                withAnimation(.easeOut(duration: 0.25)) { settings.disclaimerAccepted = true }
-            } label: { Text("I understand and accept the risk").frame(maxWidth: .infinity) }
-                .buttonStyle(PrimaryButtonStyle(tint: .white))
-        }
-        .foregroundStyle(.white)
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).fill(Color(hex: "#c62828")))
-        .transition(.opacity.combined(with: .move(edge: .top)))
-    }
-}

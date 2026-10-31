@@ -26,7 +26,6 @@ struct FM1HubApp: App {
                 .environment(device)
                 .task {
                     if Demo.isOn {
-                        settings.disclaimerAccepted = true
                         // the first launch loads the catalogue from the network: wait for it
                         for _ in 0..<60 where catalog.firmwares.isEmpty {
                             await catalog.refresh(force: true)

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Compile (unsigned, simulator)
+    name: Compile and test (simulator)
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -29,12 +29,27 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee build/xcodebuild.log | grep -E 'error:|BUILD' || true
           grep -q 'BUILD SUCCEEDED' build/xcodebuild.log || { tail -40 build/xcodebuild.log; exit 1; }
-      - name: Upload build log
+      - name: Run the unit tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          # the first available iPhone simulator, whatever this runner image ships
+          udid=$(xcrun simctl list devices available -j | python3 -c "import json,sys; ds=json.load(sys.stdin)['devices']; c=[d for v in ds.values() for d in v if d.get('isAvailable') and 'iPhone' in d['name']]; print(c[0]['udid'] if c else '')")
+          [ -n "$udid" ] || { echo '::error::no iPhone simulator available on this runner'; exit 1; }
+          xcodebuild -project FM1Hub.xcodeproj -scheme FM1Hub -configuration Debug \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            test 2>&1 | tee build/xcodebuild-test.log | grep -E 'error:|failed|passed|TEST' || true
+          grep -q 'TEST SUCCEEDED' build/xcodebuild-test.log || { tail -60 build/xcodebuild-test.log; exit 1; }
+      - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xcodebuild-log
-          path: build/xcodebuild.log
+          path: |
+            build/xcodebuild.log
+            build/xcodebuild-test.log
           if-no-files-found: ignore
 
   testflight:

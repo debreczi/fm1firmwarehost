@@ -11,6 +11,7 @@ struct BackupsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    ForEach(library.notices) { n in LibraryProblemCard(notice: n) { library.dismiss(n) } }
                     intro
                     if library.snapshots.isEmpty {
                         EmptyState(icon: "externaldrive", title: "No backups yet",

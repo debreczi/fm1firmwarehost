@@ -26,6 +26,6 @@ final class AppSettings {
         sort = SortOrder(rawValue: d.string(forKey: "sort") ?? "") ?? .installs
         gridView = d.object(forKey: "gridView") as? Bool ?? false
         selectedKinds = d.stringArray(forKey: "kinds") ?? []
-        disclaimerAccepted = d.bool(forKey: "disclaimerAccepted")
+        disclaimerAccepted = Demo.isOn || d.bool(forKey: "disclaimerAccepted")   // no warning in the screenshots
     }
 }

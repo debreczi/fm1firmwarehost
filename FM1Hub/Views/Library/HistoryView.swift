@@ -19,6 +19,7 @@ struct HistoryView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    ForEach(library.notices) { n in LibraryProblemCard(notice: n) { library.dismiss(n) } }
                     if library.history.isEmpty {
                         EmptyState(icon: "clock.arrow.circlepath", title: "Nothing installed yet", text: "Every install from this app is remembered here: what went on the FM-1, when, and whether it worked.")
                     } else {

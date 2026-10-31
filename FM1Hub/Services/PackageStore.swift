@@ -23,7 +23,7 @@ final class PackageStore {
         if let data = try? Data(contentsOf: url), let p = try? FWSCPackage(data: data), p.sha256 == f.sha256, p.product == f.product {
             return p
         }
-        let data = try await download(f.packageURL, expectedSize: f.size, onProgress: onProgress)
+        let data = try await download(f.packageURL, expectedSize: f.size, exactSize: f.size > 0 ? f.size : nil, onProgress: onProgress)
         let p = try FWSCPackage(data: data)
         guard p.sha256 == f.sha256 else { throw FM1Error.package("The package does not match the catalogue (SHA-256). Refresh the catalogue and try again.") }
         guard p.product == f.product else { throw FM1Error.package("The package identity is \(p.product), the catalogue says \(f.product).") }
@@ -35,7 +35,7 @@ final class PackageStore {
     func stockPackage(_ stock: StockFirmware?, onProgress: ((Double) -> Void)? = nil) async throws -> FWSCPackage {
         if let data = try? Data(contentsOf: stockURL), let p = try? FWSCPackage(data: data), p.isStockV15 { return p }
         let url = stock?.packageURL ?? HubAPI.url("fw/mvave/FM-1_015.fwsc")
-        let data = try await download(url, expectedSize: FWSCPackage.stockV15Size, onProgress: onProgress)
+        let data = try await download(url, expectedSize: FWSCPackage.stockV15Size, exactSize: FWSCPackage.stockV15Size, onProgress: onProgress)
         let p = try FWSCPackage(data: data)
         guard p.isStockV15 else { throw FM1Error.package("This is not the unmodified official FM-1 V15 file.") }
         try? data.write(to: stockURL, options: .atomic)
@@ -51,11 +51,12 @@ final class PackageStore {
             guard let p = newestCachedOfficial() else { throw FM1Error.package("No official firmware on this phone yet.") }
             return p
         }
+        // M-VAVE publish no size for this one, so only the ceiling in download() and this floor bound it.
         let data = try await download(HubAPI.officialLatest, expectedSize: 720_000, onProgress: onProgress)
+        guard data.count > 200_000 else { throw FM1Error.package("M-VAVE's file is only \(data.count) bytes: not an FM-1 firmware.") }
         let p = try FWSCPackage(data: data)
         guard p.isOfficial else { throw FM1Error.package("M-VAVE's file is not an official FM-1 firmware (it reports \(p.product)).") }
-        guard p.bytes.count > 200_000, p.bytes.count < 4_000_000 else { throw FM1Error.package("M-VAVE's file has an unexpected size.") }
-        keep(p)
+        try? keep(p)
         return p
     }
 
@@ -72,15 +73,25 @@ final class PackageStore {
     // MARK: The phone
 
     /// Keeps a package under its identity and hash, whatever its source (a file, M-VAVE, a maker's release).
+    /// Throws when the phone cannot store it: an install about to enter the loader needs this to have worked, or an
+    /// interrupted update has no package to resume from.
     @discardableResult
-    func keep(_ p: FWSCPackage) -> URL {
+    func keep(_ p: FWSCPackage) throws -> URL {
         let url = Paths.packages.appendingPathComponent("\(p.product)-\(p.sha256.prefix(8)).fwsc")
-        if !FileManager.default.fileExists(atPath: url.path) { try? Data(p.bytes).write(to: url, options: .atomic) }
+        // A file already under that name may be a truncated earlier write: only its own bytes may vouch for it,
+        // because this is the file a resume looks up by hash later. Anything else is replaced.
+        if let there = try? Data(contentsOf: url), FWSCPackage.sha256Hex(there) == p.sha256 { return url }
+        do {
+            try Data(p.bytes).write(to: url, options: .atomic)
+        } catch {
+            throw FM1Error.package("The package could not be stored on the phone (\(error.localizedDescription)). Free some space and try again.")
+        }
         return url
     }
 
     /// A package with this identity anywhere on the phone: the package cache, or inside an earlier backup.
-    func localPackage(product: String) -> FWSCPackage? {
+    /// With `sha256` given, only that exact build counts.
+    func localPackage(product: String, sha256: String? = nil) -> FWSCPackage? {
         var urls = cachedFiles()
         if let snaps = try? FileManager.default.contentsOfDirectory(at: Paths.snapshots, includingPropertiesForKeys: nil) {
             for d in snaps { urls.append(d.appendingPathComponent("package.fwsc")) }
@@ -90,7 +101,8 @@ final class PackageStore {
             let head = (try? h.read(upToCount: FWSCPackage.blocks * FWSCPackage.blockSize)) ?? nil
             try? h.close()
             guard let head = head, head.count == FWSCPackage.blocks * FWSCPackage.blockSize, FWSCPackage.productOf([UInt8](head)) == product else { continue }
-            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.product == product { return p }
+            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.product == product,
+               sha256 == nil || p.sha256 == sha256 { return p }
         }
         return nil
     }
@@ -125,10 +137,10 @@ final class PackageStore {
             for (tag, a) in assets.prefix(8) {
                 guard let url = URL(string: a.browser_download_url) else { continue }
                 onStatus("Trying \(f.name) \(tag): \(a.name)…")
-                guard let data = try? await download(url, expectedSize: a.size, onProgress: nil),
+                guard let data = try? await download(url, expectedSize: a.size, exactSize: a.size, onProgress: nil),
                       let p = try? FWSCPackage(data: data) else { continue }
                 if p.product == product {
-                    keep(p)
+                    try? keep(p)
                     return p
                 }
             }
@@ -138,7 +150,19 @@ final class PackageStore {
 
     // MARK: Plumbing
 
-    private func download(_ url: URL, expectedSize: Int, onProgress: ((Double) -> Void)?) async throws -> Data {
+    /// The largest .fwsc that can still be a plausible FM-1 package (they are about 0.7 MB). A body that passes this
+    /// is refused, so a broken or hostile endpoint cannot fill the phone's memory until the app is killed.
+    static let maxPackageBytes = 4_000_000
+
+    /// Streams a package into memory under a hard ceiling. `exactSize` is the size the catalogue (or a GitHub
+    /// release) states for this asset: when it is given, the body has to match it to the byte, before anything is
+    /// parsed or kept. `expectedSize` is only the progress bar's estimate for when the server announces no length.
+    private func download(_ url: URL, expectedSize: Int, exactSize: Int? = nil,
+                          maxBytes: Int = PackageStore.maxPackageBytes,
+                          onProgress: ((Double) -> Void)?) async throws -> Data {
+        if let exact = exactSize, exact <= 0 || exact > maxBytes {
+            throw FM1Error.package("This package is listed as \(exact) bytes, which cannot be an FM-1 package. Nothing was downloaded.")
+        }
         var req = URLRequest(url: url)
         req.cachePolicy = .reloadIgnoringLocalCacheData
         req.timeoutInterval = 60
@@ -147,16 +171,30 @@ final class PackageStore {
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw FM1Error.package("The package could not be downloaded (HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)).")
         }
-        let total = http.expectedContentLength > 0 ? Int(http.expectedContentLength) : expectedSize
+        // what the server says it will send, refused before the first byte is kept
+        let announced = http.expectedContentLength > 0 ? Int(http.expectedContentLength) : nil
+        if let n = announced, n > maxBytes {
+            throw FM1Error.package("The server offers \(n) bytes for a package; this app accepts at most \(maxBytes). Nothing was downloaded.")
+        }
+        if let exact = exactSize, let n = announced, n != exact {
+            throw FM1Error.package("The server offers \(n) bytes, the catalogue says \(exact). Refresh the catalogue and try again.")
+        }
+        let total = announced ?? exactSize ?? expectedSize
         var data = Data()
-        data.reserveCapacity(max(total, 0))
+        data.reserveCapacity(min(max(total, 0), maxBytes))
         var last = 0
         for try await b in bytes {
             data.append(b)
+            if data.count > maxBytes {
+                throw FM1Error.package("The download passed \(maxBytes) bytes without ending, so it is not an FM-1 package. It was stopped.")
+            }
             if total > 0, data.count - last >= 16384 {
                 last = data.count
                 onProgress?(min(1, Double(data.count) / Double(total)))
             }
+        }
+        if let exact = exactSize, data.count != exact {
+            throw FM1Error.package("The package is \(data.count) bytes, the catalogue says \(exact). Nothing was kept.")
         }
         onProgress?(1)
         return data

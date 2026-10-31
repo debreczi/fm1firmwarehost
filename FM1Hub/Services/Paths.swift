@@ -11,7 +11,6 @@ enum Paths {
     }
     static var packages: URL { ensure(documents.appendingPathComponent("Packages", isDirectory: true)) }
     static var snapshots: URL { ensure(documents.appendingPathComponent("Snapshots", isDirectory: true)) }
-    static var library: URL { documents.appendingPathComponent("library.json") }
     static var catalogCache: URL { caches.appendingPathComponent("catalog.json") }
 
     @discardableResult
