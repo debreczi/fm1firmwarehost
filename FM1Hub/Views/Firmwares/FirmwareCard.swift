@@ -10,7 +10,7 @@ struct FirmwareCard: View {
     var body: some View {
         let c = Look.colour(for: firmware.id)
         let cached = PackageStore.shared.isCached(firmware)
-        let onDevice = device.identity?.text == firmware.product
+        let onDevice = device.isRunning(firmware)
         VStack(alignment: .leading, spacing: 0) {
             NavigationLink(value: firmware) {
                 VStack(alignment: .leading, spacing: 10) {

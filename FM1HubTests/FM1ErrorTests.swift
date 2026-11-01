@@ -19,12 +19,14 @@ final class FM1ErrorTests: XCTestCase {
         XCTAssertFalse(FM1Error.badRequest("").nothingWritten)
         XCTAssertFalse(FM1Error.protocolError("").nothingWritten)
         XCTAssertFalse(FM1Error.cancelled.nothingWritten, "a cancel can land in the middle of a write")
+        XCTAssertTrue(FM1Error.backup("").nothingWritten, "a backup only reads")
+        XCTAssertEqual(FM1Error.backup("").hint, "", "and the advice for a stopped update does not apply to it")
     }
 
     func testEveryErrorHasItsOwnCodeAndSomethingToSay() {
         let all: [FM1Error] = [.notFound("a"), .model("a"), .stopped("a"), .lost("a"), .noLoader("a"),
                                .noReturn("a"), .mismatch("a"), .badRequest("a"), .foreign("a"), .package("a"),
-                               .protocolError("a"), .midi("a"), .cancelled]
+                               .protocolError("a"), .midi("a"), .backup("a"), .cancelled]
         XCTAssertEqual(Set(all.map(\.code)).count, all.count, "the UI hints off these codes, so they must be distinct")
         for e in all {
             XCTAssertFalse((e.errorDescription ?? "").isEmpty, "\(e.code) has no message")

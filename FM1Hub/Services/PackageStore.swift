@@ -63,7 +63,8 @@ final class PackageStore {
     func newestCachedOfficial() -> FWSCPackage? {
         var best: FWSCPackage?
         for u in cachedFiles() where u.lastPathComponent.hasPrefix("FM-1_0") {
-            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial {
+            // below V15 such a number can be a custom firmware's: Bubba is FM-1_003
+            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial, p.product >= FWSCPackage.stockV15Product {
                 if best == nil || p.product > best!.product { best = p }
             }
         }
@@ -115,13 +116,37 @@ final class PackageStore {
         let assets: [Asset]
     }
 
-    /// The release package that reports `product`, among the latest releases of the candidates' repositories.
-    /// `onStatus` names what is being tried, for the progress sheet.
-    func releasePackage(product: String, candidates: [Firmware], onStatus: @escaping (String) -> Void) async -> FWSCPackage? {
+    /// Does this release tag or file name carry exactly this version? 2.8 is not 2.8.4.
+    static func carries(version: String, _ text: String) -> Bool {
+        let pattern = "(?<![0-9.])" + NSRegularExpression.escapedPattern(for: version) + "(?![0-9]|\\.[0-9])"
+        return text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Is this file of that release this version? A whole number can be part of any name ("sid1-1.0.0.fwsc",
+    /// "zen-1-1.2.fwsc"), so it has to end the release's tag: "v39", "quest-39".
+    static func isVersion(_ version: String, tag: String, asset: String) -> Bool {
+        if !version.contains(".") {
+            let pattern = "(?:^|[^0-9A-Za-z.])[vV]?" + NSRegularExpression.escapedPattern(for: version) + "$"
+            return tag.range(of: pattern, options: .regularExpression) != nil
+        }
+        return carries(version: version, tag) || carries(version: version, asset)
+    }
+
+    /// The one build found of a version. Two different ones, like ChoralRoot's standard and 1-core packages, report the
+    /// same identity, and only the user knows which was on the device.
+    static func theOnlyBuild(of found: [FWSCPackage]) -> FWSCPackage? {
+        guard let first = found.first, found.allSatisfy({ $0.sha256 == first.sha256 }) else { return nil }
+        return first
+    }
+
+    /// The release package that reports `product`, among the latest releases of the candidates' repositories; with
+    /// `version`, only that version, further back, and only if there is one build of it. `onStatus` names what is being
+    /// tried, for the progress sheet.
+    func releasePackage(product: String, candidates: [Firmware], version: String? = nil, onStatus: @escaping (String) -> Void) async -> FWSCPackage? {
         for f in candidates {
             guard let repo = f.repo, !repo.isEmpty else { continue }
             onStatus("Checking \(f.name)'s releases on GitHub…")
-            var req = URLRequest(url: HubAPI.releases(repo: repo))
+            var req = URLRequest(url: HubAPI.releases(repo: repo, count: version == nil ? 4 : 30))
             req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             req.timeoutInterval = 20
             guard let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -131,18 +156,32 @@ final class PackageStore {
             var assets: [(String, Release.Asset)] = []
             for r in releases {
                 let fw = r.assets.filter { $0.name.lowercased().hasSuffix(".fwsc") && $0.size > 100_000 && $0.size < 4_000_000 }
+                    .filter { a in version.map { PackageStore.isVersion($0, tag: r.tag_name, asset: a.name) } ?? true }
                     .sorted { ($0.name.lowercased().contains("smk") ? 1 : 0) < ($1.name.lowercased().contains("smk") ? 1 : 0) }
                 for a in fw { assets.append((r.tag_name, a)) }
             }
+            var ofThatVersion: [FWSCPackage] = []
+            var sawAll = assets.count <= 8
             for (tag, a) in assets.prefix(8) {
                 guard let url = URL(string: a.browser_download_url) else { continue }
                 onStatus("Trying \(f.name) \(tag): \(a.name)…")
                 guard let data = try? await download(url, expectedSize: a.size, exactSize: a.size, onProgress: nil),
-                      let p = try? FWSCPackage(data: data) else { continue }
+                      let p = try? FWSCPackage(data: data) else {
+                    sawAll = false   // a build not seen may be another of that version
+                    continue
+                }
                 if p.product == product {
+                    if version != nil {
+                        ofThatVersion.append(p)
+                        continue
+                    }
                     try? keep(p)
                     return p
                 }
+            }
+            if sawAll, let p = PackageStore.theOnlyBuild(of: ofThatVersion) {
+                try? keep(p)
+                return p
             }
         }
         return nil

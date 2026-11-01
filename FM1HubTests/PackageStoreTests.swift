@@ -5,6 +5,48 @@ import XCTest
 /// rebuilt between two attempts keeps its identity and changes its hash. These tests pin that lookup down.
 final class PackageStoreTests: XCTestCase {
 
+    func testAReleaseCarriesExactlyItsVersion() {
+        XCTAssertTrue(PackageStore.carries(version: "2.8.3", "v2.8.3"))
+        XCTAssertTrue(PackageStore.carries(version: "2.8.3", "sloop-2.8.3.fwsc"))
+        XCTAssertTrue(PackageStore.carries(version: "2.8", "sloop-2.8.fwsc"))
+        XCTAssertTrue(PackageStore.carries(version: "0.26.0", "drum-v0.26.0"))
+        XCTAssertFalse(PackageStore.carries(version: "2.8", "v2.8.4"), "2.8 is not 2.8.4")
+        XCTAssertFalse(PackageStore.carries(version: "8.4", "v2.8.4"))
+        XCTAssertFalse(PackageStore.carries(version: "2.8.3", "sloop-2.8.31.fwsc"))
+        XCTAssertFalse(PackageStore.carries(version: "2.8.3", "2x8x3"), "a dot means a dot")
+        XCTAssertTrue(PackageStore.carries(version: "1.0.9", "BEETLE-RC1.0.9.fwsc"))
+    }
+
+    func testAWholeNumberVersionMustEndTheTag() {
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.0", asset: "sid1-1.0.0.fwsc"))
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "1.2", asset: "zen-1-1.2.fwsc"))
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "v1.0.1", asset: "mnm1-1.0.1.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("39", tag: "v39", asset: "quest.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("39", tag: "V39", asset: "quest.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("39", tag: "quest-39", asset: "fm1-quest-39.fwsc"), "FM1 Quest's real tags")
+        XCTAssertFalse(PackageStore.isVersion("39", tag: "quest-139", asset: "q.fwsc"))
+        XCTAssertFalse(PackageStore.isVersion("1", tag: "sid1", asset: "sid1.fwsc"), "part of a name")
+        XCTAssertTrue(PackageStore.isVersion("2.8.3", tag: "other", asset: "sloop-2.8.3.fwsc"))
+        XCTAssertTrue(PackageStore.isVersion("2.8.3", tag: "v2.8.3", asset: "sloop.fwsc"))
+    }
+
+    func testTwoBuildsOfAVersionAreNotPickedBetween() throws {
+        let standard = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_920", payload: 1024))
+        let oneCore = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_920", payload: 2048))
+        XCTAssertEqual(PackageStore.theOnlyBuild(of: [standard])?.sha256, standard.sha256)
+        XCTAssertEqual(PackageStore.theOnlyBuild(of: [standard, standard])?.sha256, standard.sha256)
+        XCTAssertNil(PackageStore.theOnlyBuild(of: [oneCore, standard]))
+        XCTAssertNil(PackageStore.theOnlyBuild(of: []))
+    }
+
+    func testACustomFirmwareOnAnOldOfficialNumberIsNotTheLatestOfficial() throws {
+        let store = PackageStore.shared
+        let custom = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_007", payload: 1024))
+        let u = try store.keep(custom)
+        defer { try? FileManager.default.removeItem(at: u) }
+        XCTAssertNotEqual(store.newestCachedOfficial()?.product, "FM-1_007", "hawk-chua uses that number")
+    }
+
     func testLocalPackageMatchesTheExactBuildWhenAHashIsGiven() throws {
         let store = PackageStore.shared
         let a = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_904", payload: 1024))
