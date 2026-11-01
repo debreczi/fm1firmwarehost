@@ -45,9 +45,16 @@ struct DeviceView: View {
                 Button("Save") { device.snapshot(name: snapshotName.isEmpty ? nil : snapshotName) }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Saves which firmware is on the FM-1 and its package; a Felucca-family firmware's music, settings, projects and samples too.")
+                Text("Saves which firmware is on the FM-1 and its package; on Felucca and SLOOP firmwares, the music, settings, projects and samples too.")
             }
         }
+    }
+
+    private func versionLine(_ f: Firmware, exact: Bool, reports: String) -> String {
+        if exact { return "\(f.version) · the newest · by \(f.author)" }
+        // what it says is not always what the hub calls that build: this says only what is known
+        if let said = f.versionSaid(in: device.reportedName) { return "says it is \(said) · the hub has \(f.version) · reports \(reports)" }
+        return "another version than the hub's \(f.version) · reports \(reports)"
     }
 
     private var statusCard: some View {
@@ -63,7 +70,7 @@ struct DeviceView: View {
                     if let id = device.identity {
                         Text(who?.firmware?.name ?? who?.name ?? id.text).font(.system(size: 22, weight: .bold, design: .rounded))
                         if let f = who?.firmware {
-                            Text(who?.exact == true ? "\(f.version) · the newest · by \(f.author)" : "another version than the hub's \(f.version) · reports \(id.text)")
+                            Text(versionLine(f, exact: who?.exact == true, reports: id.text))
                                 .font(.system(size: 13, design: .rounded)).foregroundStyle(Theme.textDim)
                         } else {
                             Text("reports \(id.text)").font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.textDim)
@@ -77,8 +84,8 @@ struct DeviceView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if let s = device.feluccaBackupSupported, device.isConnected {
-                Label(s ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "No music backup over USB: use this firmware's own backup tool for projects and presets.",
+            if let s = device.musicBackupSupported, device.isConnected {
+                Label(s ? (device.musicWritesBack ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "Backup saves this firmware's music too, but the app can't put it back. Its own web editor may open the file.") : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",
                       systemImage: s ? "checkmark.seal" : "info.circle")
                     .font(.system(size: 12)).foregroundStyle(s ? Theme.ok : Theme.textDim)
             }
@@ -122,10 +129,10 @@ struct DeviceView: View {
         VStack(alignment: .leading, spacing: 2) {
             SectionHeader(text: "Actions")
             VStack(spacing: 10) {
-                Button { snapshotName = device.whoIs?.firmware?.name ?? device.whoIs?.name ?? ""; askName = true } label: {
+                Button { snapshotName = device.backupName; askName = true } label: {
                     Label("Back up the FM-1 now", systemImage: "externaldrive.badge.plus")
                 }.buttonStyle(PrimaryButtonStyle(tint: Theme.accent)).disabled(device.isBusy)
-                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases) and, on Felucca-family firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
+                Text("A backup keeps the firmware package (found on the hub, on this phone or in the maker's releases; if several firmwares can report the same identity, you choose) and, on Felucca and SLOOP firmwares, your music, settings, projects and samples. Restore is one tap on the Backups tab.")
                     .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
             }
             .padding(14).card()

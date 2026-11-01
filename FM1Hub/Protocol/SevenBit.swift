@@ -119,6 +119,7 @@ enum FM1Error: LocalizedError {
     case package(String)
     case protocolError(String)
     case midi(String)
+    case backup(String)
     case cancelled
 
     var code: String {
@@ -135,6 +136,7 @@ enum FM1Error: LocalizedError {
         case .package: return "package"
         case .protocolError: return "protocol"
         case .midi: return "midi"
+        case .backup: return "backup"
         case .cancelled: return "cancelled"
         }
     }
@@ -142,7 +144,7 @@ enum FM1Error: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notFound(let s), .model(let s), .stopped(let s), .lost(let s), .noLoader(let s), .noReturn(let s),
-             .mismatch(let s), .badRequest(let s), .foreign(let s), .package(let s), .protocolError(let s), .midi(let s):
+             .mismatch(let s), .badRequest(let s), .foreign(let s), .package(let s), .protocolError(let s), .midi(let s), .backup(let s):
             return s
         case .cancelled: return "Cancelled."
         }
@@ -153,7 +155,7 @@ enum FM1Error: LocalizedError {
     /// mid-write or cannot be told apart from one, so it counts as "the device may have been touched".
     var nothingWritten: Bool {
         switch self {
-        case .notFound, .model, .foreign, .package, .midi: return true
+        case .notFound, .model, .foreign, .package, .midi, .backup: return true
         case .stopped, .lost, .noLoader, .noReturn, .mismatch, .badRequest, .protocolError, .cancelled: return false
         }
     }
@@ -165,7 +167,7 @@ enum FM1Error: LocalizedError {
         case .noLoader: return "Still stuck? Hold OCT− while switching the FM-1 on, then press Install again."
         case .lost, .stopped: return "Replug the USB cable and press Install again: the device stays in update mode until it is finished."
         case .noReturn: return "Power-cycle the FM-1. If it does not start, hold OCT− while switching it on and install again."
-        case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi: return ""
+        case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup: return ""
         }
     }
 }

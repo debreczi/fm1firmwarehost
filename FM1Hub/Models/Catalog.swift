@@ -113,6 +113,60 @@ struct Firmware: Codable, Identifiable, Hashable {
     /// The number after "FM-1_", as text.
     var productDigits: Substring { product.split(separator: "_").last ?? "" }
     var searchText: String { [name, author, what, version, kinds.joined(separator: " "), product].joined(separator: " ").lowercased() }
+
+    /// The "ident" pattern of a firmware that says nothing about the identities it reports.
+    static let anyIdentity = "FM-1_\\d{3,8}"
+
+    /// The firmware a device's own words name, among those sharing its identity. Only name and version together count:
+    /// a firmware built on another can keep that one's name with its own base version ("SLOOP 2.4.1"). What the hub adds
+    /// after a dash is not in the firmware's words: the hub's MYCELIUM 1.0-test says "MYCELIUM 1.0".
+    static func named(_ reported: String?, among all: [Firmware]) -> Firmware? {
+        guard let said = reported.map({ EditorInfo.plain($0).trimmingCharacters(in: .whitespaces).lowercased() }), !said.isEmpty else { return nil }
+        let hits = all.filter {
+            if EditorInfo.plain("\($0.name) \($0.version)").lowercased() == said { return true }
+            guard let version = $0.versionSaid(in: said) else { return false }
+            // a version can start with its v here, with no space before it for `plain` to go by
+            return EditorInfo.plain(" " + $0.version).dropFirst().lowercased().hasPrefix(version + "-")
+        }
+        return hits.count == 1 ? hits[0] : nil
+    }
+
+    /// The version a device's own words give for this firmware, if they name it: "2.8.3" from "SLOOP 2.8.3".
+    func versionSaid(in reported: String?) -> String? {
+        let own = EditorInfo.plain(name)
+        guard let said = reported.map({ EditorInfo.plain($0).trimmingCharacters(in: .whitespaces) }), said.lowercased().hasPrefix(own.lowercased() + " ") else { return nil }
+        let rest = said.dropFirst(own.count + 1)
+        return rest.first?.isNumber == true ? String(rest) : nil
+    }
+
+    /// Those among the firmwares an identity may be whose name the device said, with any version. Where firmwares have
+    /// this identity as their package's, another's range says nothing: WaveLoop, on FM-1_910, says "FELUCCA v1.0.5.2-midi23",
+    /// and Felucca's range covers that number.
+    static func saidName(_ reported: String?, among all: [Firmware], identity: String) -> [Firmware] {
+        let owners = all.filter { $0.product == identity }
+        return (owners.isEmpty ? all : owners).filter { $0.versionSaid(in: reported) != nil }
+    }
+
+    /// Did the device itself name this very package, on this identity?
+    func isNamed(by reported: String?, identity: String) -> Bool {
+        product == identity && Firmware.named(reported, among: [self]) != nil
+    }
+
+    /// Those sharing an identity, the likeliest first: the one whose name the device used, the one last installed with
+    /// this app, then the most installed.
+    static func likeliestFirst(_ all: [Firmware], identity: String, reported: String?, lastInstalled: String?) -> [Firmware] {
+        let said = saidName(reported, among: all, identity: identity)
+        func rank(_ f: Firmware) -> Int {
+            if said.contains(f) { return 0 }
+            return f.id == lastInstalled ? 1 : 2
+        }
+        return all.sorted {
+            let (a, b) = (rank($0), rank($1))
+            if a != b { return a < b }
+            if ($0.installs ?? 0) != ($1.installs ?? 0) { return ($0.installs ?? 0) > ($1.installs ?? 0) }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
 }
 
 /// M-VAVE's official V15 as the hub serves it (catalog.json "stock").
@@ -152,7 +206,7 @@ enum HubAPI {
     /// M-VAVE's current official FM-1 firmware, the file behind "PC Firmware > FM-1" on m-vave.com/download.
     static let officialLatest = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc")!
     static let officialNotes = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/releaseNote/firmware/FM-1.txt")!
-    static func releases(repo: String) -> URL { URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=4")! }
+    static func releases(repo: String, count: Int = 4) -> URL { URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(count)")! }
 
     static func url(_ path: String) -> URL {
         if let u = URL(string: path), u.scheme != nil { return u }

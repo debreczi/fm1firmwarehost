@@ -14,7 +14,7 @@ struct SettingsView: View {
                 Section {
                     Toggle(isOn: $settings.autoSnapshotBeforeInstall) {
                         Text("Back up before every install")
-                        Text("When the running firmware answers the Felucca backup protocol, its music, settings, projects and samples are saved before the new firmware goes on.").font(.footnote)
+                        Text("When the running firmware answers Felucca's or SLOOP's backup protocol, its music, settings, projects and samples are saved before the new firmware goes on.").font(.footnote)
                     }
                 } header: { Text("Installing") } footer: { Text("Every package that goes on the FM-1 is kept on this phone (about 0.6 MB each), so any firmware you installed can be put back without the network.") }
 
@@ -51,7 +51,7 @@ struct SettingsView: View {
                 Section {
                     Text("FM-1 Hub for iPhone puts the catalogue of The FM-1 Firmware Hub on your phone and installs firmwares over USB with the same update protocol the hub and M-VAVE's updater use. The hub mirrors each package from its project's GitHub release and checks it by SHA-256; this app checks the same hash before anything is written.")
                     Text("Every firmware is its author's work and responsibility. Neither the hub nor this app reviews what a firmware does. Flashing can leave a device needing a rescue: read the knowledge base first and keep the official V15 at hand.")
-                    Text("The update and backup protocol code in this app is a port of GPL-3.0 code by Leo Kuroshita (Hügelton Instruments) from the hub's installer and the Felucca web editor. The app is therefore distributed under the GPL-3.0 too.")
+                    Text("The update and backup protocol code in this app is a port of GPL-3.0 code by Leo Kuroshita (Hügelton Instruments) from the hub's installer and the Felucca web editor, and as carried on in the SLOOP web editor. The app is therefore distributed under the GPL-3.0 too.")
                     Text("FM-1 Hub for iPhone · Copyright (C) 2026 Janos Debreczi. This program comes with ABSOLUTELY NO WARRANTY. It is free software, and you are welcome to redistribute it under the GNU General Public License version 3; the licence and the complete source are in the repository linked above.")
                 } header: { Text("About") } footer: { Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")) · not affiliated with M-VAVE or the hub") }
                 .font(.footnote)
