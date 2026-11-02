@@ -73,18 +73,25 @@ struct SnapshotCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(snapshot.name).font(.system(size: 16, weight: .bold, design: .rounded)).lineLimit(1)
                 Text("\(snapshot.firmwareName)\(snapshot.version.map { " \($0)" } ?? "") · \(snapshot.identity)").font(.system(size: 12, design: .rounded)).foregroundStyle(Theme.textDim).lineLimit(1)
-                HStack(spacing: 6) {
-                    if snapshot.hasPackage {
-                        Chip(text: catalog.packageIsUnconfirmed(in: snapshot) ? "firmware (unconfirmed)" : snapshot.packageExact ? "firmware" : "firmware (hub's version)", icon: "shippingbox", tint: c)
-                    }
-                    if snapshot.hasArchive { Chip(text: "music \(ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file))", icon: "music.note", tint: Theme.ok) }
+                // Side by side when they fit, else one above the other, smaller on the narrowest cards: no word may break or be cut.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { chips(tint: c) }
+                    VStack(alignment: .leading, spacing: 4) { chips(tint: c) }
                 }
+                .lineLimit(1).minimumScaleFactor(0.7)
                 Text(snapshot.date.shortText).font(.system(size: 11, design: .rounded)).foregroundStyle(Theme.textFaint)
             }
             Spacer()
-            Image(systemName: "chevron.right").foregroundStyle(Theme.textFaint)
+            Image(systemName: "chevron.right").font(.system(size: 17)).foregroundStyle(Theme.textFaint)   // a fixed size, like the rest of this card
         }
         .padding(12).card(tint: c)
+    }
+
+    @ViewBuilder private func chips(tint c: Color) -> some View {
+        if snapshot.hasPackage {
+            Chip(text: catalog.packageIsUnconfirmed(in: snapshot) ? "firmware (unconfirmed)" : snapshot.packageExact ? "firmware" : "firmware (hub's version)", icon: "shippingbox", tint: c)
+        }
+        if snapshot.hasArchive { Chip(text: "music \(ByteCountFormatter.string(fromByteCount: Int64(snapshot.archiveBytes ?? 0), countStyle: .file))", icon: "music.note", tint: Theme.ok) }
     }
 }
 
