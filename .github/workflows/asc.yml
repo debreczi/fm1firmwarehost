@@ -1,12 +1,15 @@
 name: App Store Connect
 
-# Quick App Store Connect tasks, no build. Run by hand.
+# Quick App Store Connect tasks, no build. Run by hand, on the branch whose version they act on.
 on:
   workflow_dispatch:
     inputs:
       tasks:
-        description: "Comma list: beta (newest build to Public Beta + beta review), manual (manual release), chores, or leave empty for a status report"
+        description: "Comma list: beta (the build to Public Beta + beta review), manual (manual release), chores, or leave empty for a status report"
         default: "beta,manual"
+      build:
+        description: "Build number, such as 20261102.24 (optional; empty means the newest processed build of this branch's version)"
+        default: ""
       what_to_test:
         description: "'What to Test' text for the beta build (optional)"
         default: ""
@@ -20,6 +23,7 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       ASC_TASKS: ${{ inputs.tasks }}
+      BUILD_NUMBER: ${{ inputs.build }}
       WHAT_TO_TEST: ${{ inputs.what_to_test }}
     steps:
       - uses: actions/checkout@v4

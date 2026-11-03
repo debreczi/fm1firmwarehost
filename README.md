@@ -47,8 +47,9 @@ FM-1 needs a real phone.
 
 ## TestFlight from GitHub
 
-`.github/workflows/ios.yml` compiles the app on every push (unsigned, for the simulator, so it needs no secrets) and
-then archives, signs and uploads it to TestFlight when four repository secrets are present. Signing uses Xcode's
+`.github/workflows/ios.yml` compiles and tests the app on every pull request and on every push to `main` or a
+`release/` branch (unsigned, for the simulator, so it needs no secrets). On those pushes it then archives, signs and
+uploads it to TestFlight when four repository secrets are present. Signing uses Xcode's
 cloud-managed certificates through an App Store Connect API key, so no certificate or provisioning profile is
 exported by hand.
 
@@ -69,8 +70,9 @@ One-time setup (needs a paid Apple Developer Program membership):
    | `ASC_KEY_P8` | the full text of the `.p8` file (or its base64) |
    | `APPLE_TEAM_ID` | the 10-character team ID |
 
-5. Push to `main` or run the workflow by hand (Actions → iOS → Run workflow). The build number is
-   `yyyymmdd.run` (UTC date and the workflow run number, e.g. `20261027.9`); Settings in the app shows it.
+5. Push to `main` or a `release/` branch, or run the workflow by hand on one of them (Actions → iOS → Run workflow).
+   The version is `MARKETING_VERSION` in the project file of that branch; the build number is `yyyymmdd.run` (UTC
+   date and the workflow run number, e.g. `20261027.9`), so it rises across branches. Settings in the app shows both.
 6. First build only: in App Store Connect → TestFlight, answer the export-compliance question (the app uses only
    HTTPS, so "standard encryption, exempt"), then add yourself as an internal tester. The TestFlight app on the phone
    installs it.
@@ -143,8 +145,11 @@ Not affiliated with M-VAVE or with the hub. Flashing can leave a device needing 
 
 ## App Store
 
-`appstore/metadata/` holds the listing (fastlane `deliver` layout). The **App Store** workflow
-(`.github/workflows/appstore.yml`, run by hand) builds the app for the simulator, takes the screenshots in a demo mode
-(`-FM1Screenshots YES`, sample data in memory only, never on a real launch), uploads listing and screenshots, sets the
-price to free, fills the age rating, attaches the newest processed build to version 1.0, and prints the status of
-builds and versions. It never submits for review.
+Each App Store version has its own branch, `release/<major>.<minor>`, and its builds come only from there; `main`
+carries the next version. `appstore/metadata/` holds the listing (fastlane `deliver` layout). The **App Store** workflow
+(`.github/workflows/appstore.yml`, run by hand on a release branch) builds the app for the simulator, takes the
+screenshots in a demo mode (`-FM1Screenshots YES`, sample data in memory only, never on a real launch), uploads listing
+and screenshots, sets the price to free, fills the age rating, attaches a build of the branch's version (the one named
+when it is run, or else the newest processed one), and prints the status of builds and versions. It never submits for
+review. The **App Store Connect** workflow (`.github/workflows/asc.yml`) does the quicker tasks for the version of the
+branch it runs on, such as sending a build to the public TestFlight group.

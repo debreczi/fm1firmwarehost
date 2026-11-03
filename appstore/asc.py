@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """App Store Connect chores the listing upload does not cover: free price, availability, age rating, build
 attached to the version, and a status report. Reads the API key from ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH.
-Never submits anything for review."""
+The version is the checked-out branch's (app_version.py); builds are only ever that version's: BUILD_NUMBER when
+given, else the newest processed one. Never submits anything for review."""
 import json, os, sys, time
 import jwt, requests
+from app_version import app_version
 
 BUNDLE = "com.debreczi.fm1hub"
-VERSION = os.environ.get("APP_VERSION", "1.0")
+VERSION = app_version()
+BUILD = os.environ.get("BUILD_NUMBER", "").strip()
 API = "https://api.appstoreconnect.apple.com"
 
 
@@ -117,17 +120,33 @@ def version():
     return v
 
 
+def pick_build():
+    """The build the tasks act on: BUILD_NUMBER when given, else the newest processed build, always of VERSION."""
+    params = {"filter[app]": APP, "filter[preReleaseVersion.version]": VERSION, "filter[processingState]": "VALID",
+              "sort": "-uploadedDate", "limit": 1}
+    if BUILD:
+        params["filter[version]"] = BUILD
+    b = call("GET", "/v1/builds", params=params)["data"]
+    return b[0] if b else None
+
+
+def no_build():
+    return f"no processed build {BUILD} of {VERSION}" if BUILD else f"no processed build of {VERSION} yet"
+
+
 def attach_build():
+    branch = os.environ.get("GITHUB_REF_NAME", "")
+    if not branch.startswith("release/"):
+        print(f"  build: not attached; App Store builds come from a release branch, not {branch or 'this checkout'}")
+        return
     v = version()
     if v is None:
         return
     cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data")
-    builds = call("GET", "/v1/builds", params={"filter[app]": APP, "filter[processingState]": "VALID",
-                                                "sort": "-uploadedDate", "limit": 1})["data"]
-    if not builds:
-        print("  build: no processed build yet")
+    b = pick_build()
+    if not b:
+        print(f"  build: {no_build()}")
         return
-    b = builds[0]
     if cur and cur["id"] == b["id"]:
         print(f"  build: {b['attributes']['version']} already attached to {VERSION}")
         return
@@ -138,30 +157,32 @@ def attach_build():
 def report():
     print("\nBuilds (newest first):")
     builds = call("GET", "/v1/builds", params={"filter[app]": APP, "sort": "-uploadedDate", "limit": 6,
-                                                "include": "buildBetaDetail"})
-    det = {d["id"]: d["attributes"] for d in builds.get("included", []) if d["type"] == "buildBetaDetails"}
+                                                "include": "buildBetaDetail,preReleaseVersion"})
+    inc = {(d["type"], d["id"]): d["attributes"] for d in builds.get("included", [])}
+
+    def related(b, rel, kind):
+        return inc.get((kind, (b["relationships"].get(rel, {}).get("data") or {}).get("id")), {})
+
     for b in builds["data"]:
         a = b["attributes"]
-        bd = det.get((b["relationships"].get("buildBetaDetail", {}).get("data") or {}).get("id"), {})
-        print(f"  {a['version']:<14} uploaded {a['uploadedDate'][:16]}  processing {a['processingState']:<10}"
-              f" TestFlight internal {bd.get('internalBuildState', '?')}")
+        bd = related(b, "buildBetaDetail", "buildBetaDetails")
+        pv = related(b, "preReleaseVersion", "preReleaseVersions")
+        print(f"  {pv.get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
+              f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState', '?')}")
+    b = pick_build()
+    print(f"\nThis branch is version {VERSION}; beta and chores would use "
+          + (f"build {b['attributes']['version']}" if b else no_build()))
     print("\nApp Store versions:")
     for x in call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"limit": 10})["data"]:
         a = x["attributes"]
         print(f"  {a['platform']} {a['versionString']}: {a.get('appVersionState') or a.get('appStoreState')}, release {a.get('releaseType')}")
 
 
-def newest_valid():
-    b = call("GET", "/v1/builds", params={"filter[app]": APP, "filter[processingState]": "VALID",
-                                          "sort": "-uploadedDate", "limit": 1})["data"]
-    return b[0] if b else None
-
-
 def beta(group_name=os.environ.get("BETA_GROUP", "Public Beta")):
-    """The newest processed build to an external TestFlight group, with its beta review submitted."""
-    b = newest_valid()
+    """This version's build (pick_build) to an external TestFlight group, with its beta review submitted."""
+    b = pick_build()
     if not b:
-        print("  beta: no processed build")
+        print(f"  beta: {no_build()}")
         return
     ver = b["attributes"]["version"]
     groups = call("GET", "/v1/betaGroups", params={"filter[app]": APP, "limit": 50})["data"]
