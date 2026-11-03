@@ -24,7 +24,11 @@ S.headers["Authorization"] = "Bearer " + token()
 
 
 def call(method, path, **kw):
-    r = S.request(method, API + path, timeout=60, **kw)
+    for attempt in range(3):  # App Store Connect has passing server errors; only a read is safe to repeat
+        r = S.request(method, API + path, timeout=60, **kw)
+        if r.status_code < 500 or method != "GET" or attempt == 2:
+            break
+        time.sleep(10)
     if r.status_code >= 400:
         detail = ""
         try:
@@ -187,20 +191,22 @@ def attach_build():
 
 def report():
     print("\nBuilds (newest first):")
-    builds = call("GET", "/v1/builds", params={"filter[app]": APP, "sort": "-uploadedDate", "limit": 6,
-                                                "include": "buildBetaDetail,preReleaseVersion"})
-    inc = {(d["type"], d["id"]): d["attributes"] for d in builds.get("included", [])}
 
-    def related(b, rel, kind):
-        return inc.get((kind, (b["relationships"].get(rel, {}).get("data") or {}).get("id")), {})
+    def newest(rel):  # the newest builds, and the attributes of each one's `rel`, by build id
+        r = call("GET", "/v1/builds", params={"filter[app]": APP, "sort": "-uploadedDate", "limit": 6, "include": rel})
+        inc = {d["id"]: d["attributes"] for d in r.get("included", [])}
+        return r["data"], {b["id"]: inc.get((b["relationships"].get(rel, {}).get("data") or {}).get("id"), {})
+                           for b in r["data"]}
 
-    for b in builds["data"]:
+    # asked for apart: with both in one include, App Store Connect left the beta states out
+    builds, det = newest("buildBetaDetail")
+    _, pre = newest("preReleaseVersion")
+    for b in builds:
         a = b["attributes"]
-        bd = related(b, "buildBetaDetail", "buildBetaDetails")
-        pv = related(b, "preReleaseVersion", "preReleaseVersions")
-        print(f"  {pv.get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
-              f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState', '?')}")
-    v = version()
+        print(f"  {pre.get(b['id'], {}).get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
+              f"  processing {a['processingState']:<10} TestFlight internal {det[b['id']].get('internalBuildState', '?')}")
+    vs = versions()
+    v = next((x for x in vs if x["attributes"]["versionString"] == VERSION), None)
     cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data") if v else None
     b = pick_build()
     found = no_build() if not b else (f"named build {BUILD} is one of its processed builds" if BUILD
@@ -208,7 +214,7 @@ def report():
     print(f"\nThis branch is version {VERSION}" + (f", with build {cur['attributes']['version']} attached" if cur else "")
           + f"; {found}")
     print("\nApp Store versions:")
-    for x in call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"limit": 10})["data"]:
+    for x in vs:
         a = x["attributes"]
         print(f"  {a['platform']} {a['versionString']}: {a.get('appVersionState') or a.get('appStoreState')}, release {a.get('releaseType')}")
 
