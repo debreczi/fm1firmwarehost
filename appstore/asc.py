@@ -24,10 +24,15 @@ S.headers["Authorization"] = "Bearer " + token()
 
 
 def call(method, path, **kw):
-    for attempt in range(3):  # App Store Connect has passing server errors; only a read is safe to repeat
-        r = S.request(method, API + path, timeout=60, **kw)
-        if r.status_code < 500 or method != "GET" or attempt == 2:
-            break
+    tries = 3 if method == "GET" else 1  # App Store Connect has passing failures; only a read is safe to repeat
+    for attempt in range(1, tries + 1):
+        try:
+            r = S.request(method, API + path, timeout=60, **kw)
+            if r.status_code < 500 or attempt == tries:
+                break
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError):
+            if attempt == tries:
+                raise
         time.sleep(10)
     if r.status_code >= 400:
         detail = ""
