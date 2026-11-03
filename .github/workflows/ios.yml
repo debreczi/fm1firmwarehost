@@ -2,7 +2,7 @@ name: iOS
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
   workflow_dispatch:
 
@@ -55,7 +55,9 @@ jobs:
   testflight:
     name: Archive and upload to TestFlight
     needs: build
-    if: github.event_name != 'pull_request'
+    # Uploads come only from main (the next version) and release branches (App Store versions). The version is
+    # MARKETING_VERSION in the project file; only the build number is set here.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
     runs-on: macos-26
     timeout-minutes: 45
     env:

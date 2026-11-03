@@ -1,6 +1,7 @@
 name: App Store
 
-# Run by hand: screenshots, listing, price, age rating, build for version 1.0, status. Never submits for review.
+# Run by hand on a release branch: screenshots, listing, price, age rating, build for the branch's version, status.
+# Never submits for review.
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +9,14 @@ on:
         description: Upload listing and screenshots to App Store Connect
         type: boolean
         default: true
+      build:
+        description: "Build number to attach, such as 20261102.24, while the version is being prepared or was rejected. Empty attaches the newest processed build of this branch's version, and only if the version has no build yet"
+        default: ""
+
+# one run at a time: two uploads at once could each find no open version and both edit the one the first creates
+concurrency:
+  group: appstore
+  cancel-in-progress: false
 
 jobs:
   appstore:
@@ -18,7 +27,21 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
     steps:
+      - name: Check the branch
+        id: branch
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/*) ;;
+            *) echo "::error::Run this on a release branch, such as release/1.0, not $GITHUB_REF_NAME."; exit 1 ;;
+          esac
+
       - uses: actions/checkout@v4
+
+      - name: Version from the project file
+        run: |
+          v=$(python3 appstore/app_version.py)
+          echo "Version $v"
+          echo "APP_VERSION=$v" >> "$GITHUB_ENV"
 
       - name: Build for the simulator
         run: |
@@ -70,8 +93,10 @@ jobs:
           PHONE=$(pick 'iPhone.*Pro Max')
           PAD=$(pick 'iPad Pro.*13')
           echo "iPhone: $PHONE  iPad: $PAD"
-          [ -n "$PHONE" ] && shoot "$PHONE" iphone
-          [ -n "$PAD" ] && shoot "$PAD" ipad
+          # both or neither: deliver replaces the screenshots, so a missing device would delete its old ones
+          [ -n "$PHONE" ] && [ -n "$PAD" ] || { echo "::error::no iPhone Pro Max or no 13-inch iPad Pro simulator on this runner"; exit 1; }
+          shoot "$PHONE" iphone
+          shoot "$PAD" ipad
           sips -g pixelWidth -g pixelHeight "$OUT"/*.png | paste - - - | awk '{print $1, $3"x"$5}'
 
       - uses: actions/upload-artifact@v4
@@ -81,6 +106,7 @@ jobs:
 
       - name: App Store Connect API key
         run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography requests 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography requests
           mkdir -p ~/private_keys
           if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
             printf '%s\n' "$ASC_KEY_P8" > ~/private_keys/AuthKey_$ASC_KEY_ID.p8
@@ -95,6 +121,10 @@ jobs:
                     open(os.path.expanduser("~/private_keys/api_key.json"), "w"))
           PY
 
+      - name: Check that no other version is open
+        if: inputs.upload
+        run: ASC_TASKS=preflight python3 appstore/asc.py
+
       - name: Upload listing and screenshots
         if: inputs.upload
         run: |
@@ -104,7 +134,7 @@ jobs:
           fastlane deliver \
             --api_key_path ~/private_keys/api_key.json \
             --app_identifier com.debreczi.fm1hub \
-            --app_version 1.0 \
+            --app_version "$APP_VERSION" \
             --metadata_path appstore/metadata \
             --screenshots_path appstore/screenshots \
             --overwrite_screenshots true \
@@ -115,7 +145,7 @@ jobs:
             --force true
 
       - name: Price, age rating, build, status
-        if: always()
-        run: |
-          python3 -m pip install --quiet --break-system-packages pyjwt cryptography requests 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography requests
-          python3 appstore/asc.py
+        if: always() && steps.branch.outcome == 'success'
+        env:
+          BUILD_NUMBER: ${{ inputs.build }}
+        run: python3 appstore/asc.py
