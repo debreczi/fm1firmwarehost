@@ -1,7 +1,32 @@
-FM-1 Hub manages firmware for the M-VAVE FM-1, a small USB MIDI synthesizer. Installing, backing up and restoring need the physical device connected over USB (it is a class-compliant USB MIDI device; the app uses CoreMIDI and SysEx with the same update protocol as M-VAVE's own updater).
+FM-1 Hub installs community firmware on the M-VAVE FM-1, a small USB MIDI synthesizer, and backs it up and restores it. It is free, with no account, ads, in-app purchases or data collection.
 
-Without the device you can review: the Firmwares tab (catalogue from thefirmwarehub.com, search, filters, detail pages), the FM-1 tab (Connect reports "No FM-1 found", official firmware section, help), the Backups and History tabs (empty until used), and Settings.
+SCREEN RECORDING
+The attached video (5 minutes, on an iPhone with a real FM-1, build 1.0 (20261102.24)) starts on the Home Screen. It shows browsing the catalogue, connecting the FM-1, backing it up, installing SLOOP 2.8.4 from the catalogue (the app backs up the music first), then restoring the earlier backup: the firmware the FM-1 had before (SLOOP 2.8.1) and its music.
 
-The firmwares are open-source projects by independent authors, mirrored from their GitHub releases by The FM-1 Firmware Hub; the official firmware is downloaded from M-VAVE's public download server. The app does not run downloaded code on the iPhone: packages are only sent to the external FM-1 hardware. On first launch the app shows a risk disclaimer that must be accepted.
+PURPOSE AND AUDIENCE
+For owners of the M-VAVE FM-1. Independent developers write alternative firmwares for it: synthesizers, grooveboxes, drum machines. The app lets an owner pick one, install it over USB from an iPhone, and keep backups so the previous firmware and their music can be put back.
 
-No account or login is needed.
+SETUP
+1. An M-VAVE FM-1, switched on.
+2. iPhone 15 or later: a USB-C to USB-C cable. Earlier iPhones: Apple's Lightning to USB Camera Adapter.
+3. Open the app and accept the risk notice shown on first launch.
+4. FM-1 tab > Connect. The app shows which firmware the FM-1 runs.
+5. Try "Back up the FM-1 now", then Install on a firmware in the Firmwares tab, then Backups > the backup > "Restore the firmware".
+
+Without the device, the Firmwares tab (catalogue, search, filters, detail pages), the FM-1 tab (Connect reports that no FM-1 was found), Backups and History (empty until used) and Settings can be reviewed. Installing, backing up and restoring need the FM-1.
+
+EXTERNAL SERVICES
+There is no server, account or analytics of our own. The app downloads public files only:
+- thefirmwarehub.com: the firmware catalogue, firmware packages and pictures
+- api.github.com and github.com: a firmware's release files from its maker, when a backup needs a version the catalogue doesn't have
+- M-VAVE's download server (yms-file-store.oss-cn-hongkong.aliyuncs.com): M-VAVE's official firmware
+Links to project pages, web editors and feedback open in Safari. Downloaded firmware never runs on the iPhone: the app only sends it to the FM-1 over USB MIDI, with the same update protocol M-VAVE's own updater uses.
+
+REGIONAL DIFFERENCES
+None. The app is in English and works the same in every region.
+
+THIRD-PARTY MATERIAL
+- The app contains no firmware. Each firmware is its author's own open-source work under its own licence, shown in the app, and is downloaded only when the user installs or backs it up. M-VAVE's official firmware comes from M-VAVE's own public download server.
+- The update and backup protocol code is a port of GPL-3.0 code by Leo Kuroshita (Hügelton Instruments). He was asked before App Store distribution and has no objection as long as the app stays open source under the GPL-3.0. The app is GPL-3.0 and its full source is public: https://github.com/debreczi/fm1firmwarehost (see NOTICE.md). His written answer is available on request.
+- The app is not made by, endorsed by or associated with M-VAVE or The FM-1 Firmware Hub. "M-VAVE" and "FM-1" only name the hardware it works with.
+- The app has no regulated content.
