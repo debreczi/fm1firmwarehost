@@ -196,20 +196,19 @@ def attach_build():
 
 def report():
     print("\nBuilds (newest first):")
+    builds = call("GET", "/v1/builds", params={"filter[app]": APP, "sort": "-uploadedDate", "limit": 6,
+                                                "include": "buildBetaDetail,preReleaseVersion"})
+    inc = {(d["type"], d["id"]): d["attributes"] for d in builds.get("included", [])}
 
-    def newest(rel):  # the newest builds, and the attributes of each one's `rel`, by build id
-        r = call("GET", "/v1/builds", params={"filter[app]": APP, "sort": "-uploadedDate", "limit": 6, "include": rel})
-        inc = {d["id"]: d["attributes"] for d in r.get("included", [])}
-        return r["data"], {b["id"]: inc.get((b["relationships"].get(rel, {}).get("data") or {}).get("id"), {})
-                           for b in r["data"]}
+    def related(b, rel, kind):
+        return inc.get((kind, (b["relationships"].get(rel, {}).get("data") or {}).get("id")), {})
 
-    # asked for apart: with both in one include, App Store Connect left the beta states out
-    builds, det = newest("buildBetaDetail")
-    _, pre = newest("preReleaseVersion")
-    for b in builds:
+    for b in builds["data"]:
         a = b["attributes"]
-        print(f"  {pre.get(b['id'], {}).get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
-              f"  processing {a['processingState']:<10} TestFlight internal {det[b['id']].get('internalBuildState', '?')}")
+        bd = related(b, "buildBetaDetail", "buildBetaDetails")
+        pv = related(b, "preReleaseVersion", "preReleaseVersions")
+        print(f"  {pv.get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
+              f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState', '?')}")
     vs = versions()
     v = next((x for x in vs if x["attributes"]["versionString"] == VERSION), None)
     cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data") if v else None
