@@ -5,9 +5,8 @@ The version is the checked-out branch's (app_version.py); builds are only ever t
 given, else the newest processed one. Never submits anything for review."""
 import json, os, sys, time
 import jwt, requests
-from app_version import app_version
+from app_version import BUNDLE, app_version
 
-BUNDLE = "com.debreczi.fm1hub"
 VERSION = app_version()
 BUILD = os.environ.get("BUILD_NUMBER", "").strip()
 API = "https://api.appstoreconnect.apple.com"
@@ -36,11 +35,15 @@ def call(method, path, **kw):
     return r.json() if r.content else {}
 
 
+FAILED = []
+
+
 def step(name, fn):
     try:
         fn()
-    except Exception as e:  # report and go on: one chore failing must not hide the others
+    except Exception as e:  # report and go on: one chore failing must not hide the others; the run fails at the end
         print(f"  ! {name}: {e}")
+        FAILED.append(name)
 
 
 app = call("GET", "/v1/apps", params={"filter[bundleId]": BUNDLE})["data"][0]
@@ -145,8 +148,7 @@ def attach_build():
     cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data")
     b = pick_build()
     if not b:
-        print(f"  build: {no_build()}")
-        return
+        raise RuntimeError(no_build())
     if cur and cur["id"] == b["id"]:
         print(f"  build: {b['attributes']['version']} already attached to {VERSION}")
         return
@@ -170,8 +172,8 @@ def report():
         print(f"  {pv.get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
               f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState', '?')}")
     b = pick_build()
-    print(f"\nThis branch is version {VERSION}; beta and chores would use "
-          + (f"build {b['attributes']['version']}" if b else no_build()))
+    print(f"\nThis branch is version {VERSION}; "
+          + (f"beta and chores would use build {b['attributes']['version']}" if b else no_build()))
     print("\nApp Store versions:")
     for x in call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"limit": 10})["data"]:
         a = x["attributes"]
@@ -182,8 +184,7 @@ def beta(group_name=os.environ.get("BETA_GROUP", "Public Beta")):
     """This version's build (pick_build) to an external TestFlight group, with its beta review submitted."""
     b = pick_build()
     if not b:
-        print(f"  beta: {no_build()}")
-        return
+        raise RuntimeError(no_build())
     ver = b["attributes"]["version"]
     groups = call("GET", "/v1/betaGroups", params={"filter[app]": APP, "limit": 50})["data"]
     g = next((x for x in groups if x["attributes"]["name"] == group_name), None)
@@ -241,3 +242,5 @@ if "beta" in TASKS:
 if "manual" in TASKS:
     step("manual release", manual_release)
 step("report", report)
+if FAILED:
+    sys.exit(f"\nFailed: {', '.join(FAILED)}")
