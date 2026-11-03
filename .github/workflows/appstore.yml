@@ -10,8 +10,13 @@ on:
         type: boolean
         default: true
       build:
-        description: "Build number to attach, such as 20261102.24. Empty attaches the newest processed build of this branch's version, and only if the version has no build yet"
+        description: "Build number to attach, such as 20261102.24, while the version is being prepared or was rejected. Empty attaches the newest processed build of this branch's version, and only if the version has no build yet"
         default: ""
+
+# one run at a time: two uploads at once could each find no open version and both edit the one the first creates
+concurrency:
+  group: appstore
+  cancel-in-progress: false
 
 jobs:
   appstore:

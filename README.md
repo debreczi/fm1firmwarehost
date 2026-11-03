@@ -151,8 +151,8 @@ Each App Store version gets its own branch, `release/<major>.<minor>`, cut from 
 simulator, takes the screenshots in a demo mode (`-FM1Screenshots YES`, sample data in memory only, never on a real
 launch), uploads listing and screenshots, sets the price to free, fills the age rating, attaches a build of the branch's
 version, and prints the status of builds and versions. It attaches the build named when it is run, or else the newest
-processed one if the version has no build yet. It uploads only when the branch's version is new, being prepared or
-rejected, and every other version is live or finished, because `deliver` edits whichever version is open (waiting for
-review included) and renames it to the branch's version. It never submits for review. The **App Store Connect** workflow
-(`.github/workflows/asc.yml`) does the quicker tasks for the version of the branch it runs on, such as sending a build
-to the public TestFlight group.
+processed one if the version has no build yet, and only while the version is being prepared or was rejected. It
+uploads only when the branch's version is new, being prepared or rejected, and every other version is live or
+finished, because `deliver` edits whichever version is open (waiting for review included) and renames it to the
+branch's version. It never submits for review. The **App Store Connect** workflow (`.github/workflows/asc.yml`) does
+the quicker tasks for the version of the branch it runs on, such as sending a build to the public TestFlight group.
