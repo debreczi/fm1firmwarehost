@@ -5,10 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       tasks:
-        description: "Comma list: beta (the build to Public Beta + beta review), manual (manual release), chores, or leave empty for a status report"
+        description: "Comma list: beta (the build to Public Beta + beta review), manual (manual release), chores (price, availability, age rating; on a release branch also the build), or status or empty for a status report"
         default: "beta,manual"
       build:
-        description: "Build number, such as 20261102.24. Empty means the newest processed build of this branch's version; chores then attach it only if the version has no build yet"
+        description: "Build number, such as 20261102.24. Empty means the newest processed build of this branch's version; chores attach it only on a release branch, and only if the version has no build yet"
         default: ""
       what_to_test:
         description: "'What to Test' text for the beta build (optional)"

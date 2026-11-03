@@ -88,8 +88,10 @@ jobs:
           PHONE=$(pick 'iPhone.*Pro Max')
           PAD=$(pick 'iPad Pro.*13')
           echo "iPhone: $PHONE  iPad: $PAD"
-          [ -n "$PHONE" ] && shoot "$PHONE" iphone
-          [ -n "$PAD" ] && shoot "$PAD" ipad
+          # both or neither: deliver replaces the screenshots, so a missing device would delete its old ones
+          [ -n "$PHONE" ] && [ -n "$PAD" ] || { echo "::error::no iPhone Pro Max or no 13-inch iPad Pro simulator on this runner"; exit 1; }
+          shoot "$PHONE" iphone
+          shoot "$PAD" ipad
           sips -g pixelWidth -g pixelHeight "$OUT"/*.png | paste - - - | awk '{print $1, $3"x"$5}'
 
       - uses: actions/upload-artifact@v4

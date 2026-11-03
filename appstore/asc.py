@@ -115,25 +115,36 @@ def age_rating():
 
 
 def versions():
-    return call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"filter[platform]": "IOS", "limit": 10})["data"]
+    return call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"filter[platform]": "IOS", "limit": 200})["data"]
 
 
 def version():
     return next((x for x in versions() if x["attributes"]["versionString"] == VERSION), None)
 
 
-# The states in which fastlane deliver takes a version as the one to edit, and renames it to the version it's given.
-EDITABLE = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "WAITING_FOR_REVIEW",
-            "INVALID_BINARY"}
+# A version in an OPEN state takes a new listing and build. DONE ones are live or finished.
+OPEN = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY"}
+DONE = {"READY_FOR_SALE", "READY_FOR_DISTRIBUTION", "REPLACED_WITH_NEW_VERSION", "REMOVED_FROM_SALE",
+        "DEVELOPER_REMOVED_FROM_SALE"}
+
+
+def states(v):
+    a = v["attributes"]
+    return {a.get("appStoreState"), a.get("appVersionState")} - {None}
 
 
 def preflight():
-    """Run before deliver: stop if another version is still editable, or deliver would turn it into this one."""
-    other = [x["attributes"]["versionString"] for x in versions() if x["attributes"]["versionString"] != VERSION
-             and EDITABLE & {x["attributes"].get("appStoreState"), x["attributes"].get("appVersionState")}]
-    if other:
-        raise RuntimeError(f"version {', '.join(other)} is still open, and deliver would rename it to {VERSION}")
-    print(f"  preflight: no other version is open, so the upload goes to {VERSION}")
+    """Run before deliver, which edits whichever version is open (waiting for review included) and renames it to the
+    version it's given. Go on only if every other version is done, and this one is new, being prepared or rejected."""
+    for v in versions():
+        name, st = v["attributes"]["versionString"], states(v)
+        if name != VERSION and not st & DONE:
+            raise RuntimeError(f"version {name} is still {'/'.join(sorted(st)) or 'in an unknown state'}; "
+                               f"it has to be live or finished before {VERSION} is uploaded")
+        if name == VERSION and not st & OPEN:
+            raise RuntimeError(f"version {VERSION} is {'/'.join(sorted(st)) or 'in an unknown state'}, "
+                               "so its listing can't change now")
+    print(f"  preflight: the upload goes to {VERSION}")
 
 
 def pick_build():
@@ -168,6 +179,8 @@ def attach_build():
     if cur and cur["id"] == b["id"]:
         print(f"  build: {b['attributes']['version']} already attached to {VERSION}")
         return
+    if not states(v) & OPEN:
+        raise RuntimeError(f"version {VERSION} is {'/'.join(sorted(states(v)))}, so its build can't change now")
     call("PATCH", f"/v1/appStoreVersions/{v['id']}/relationships/build", json={"data": {"type": "builds", "id": b["id"]}})
     print(f"  build: attached {b['attributes']['version']} to version {VERSION}")
 
@@ -187,9 +200,13 @@ def report():
         pv = related(b, "preReleaseVersion", "preReleaseVersions")
         print(f"  {pv.get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
               f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState', '?')}")
+    v = version()
+    cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data") if v else None
     b = pick_build()
-    print(f"\nThis branch is version {VERSION}; "
-          + (f"beta and chores would use build {b['attributes']['version']}" if b else no_build()))
+    found = no_build() if not b else (f"named build {BUILD} is one of its processed builds" if BUILD
+                                      else f"its newest processed build is {b['attributes']['version']}")
+    print(f"\nThis branch is version {VERSION}" + (f", with build {cur['attributes']['version']} attached" if cur else "")
+          + f"; {found}")
     print("\nApp Store versions:")
     for x in call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"limit": 10})["data"]:
         a = x["attributes"]
@@ -250,6 +267,9 @@ def manual_release():
 
 TASKS = [t.strip() for t in os.environ.get("ASC_TASKS", "chores").split(",") if t.strip()]
 print("Tasks:", ", ".join(TASKS))
+unknown = set(TASKS) - {"preflight", "chores", "beta", "manual", "status"}
+if unknown:
+    sys.exit(f"Unknown task: {', '.join(sorted(unknown))}. Known: preflight, chores, beta, manual, status")
 if "preflight" in TASKS:
     step("preflight", preflight)
 if "chores" in TASKS:
