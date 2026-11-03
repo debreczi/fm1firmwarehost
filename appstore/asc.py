@@ -114,13 +114,26 @@ def age_rating():
     print(f"  age rating: {len(attrs)} answers set (none / no for every question)")
 
 
+def versions():
+    return call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"filter[platform]": "IOS", "limit": 10})["data"]
+
+
 def version():
-    vs = call("GET", f"/v1/apps/{APP}/appStoreVersions", params={"filter[platform]": "IOS", "limit": 10})["data"]
-    v = next((x for x in vs if x["attributes"]["versionString"] == VERSION), None)
-    if v is None:
-        print(f"  version {VERSION}: not found")
-        return None
-    return v
+    return next((x for x in versions() if x["attributes"]["versionString"] == VERSION), None)
+
+
+# The states in which fastlane deliver takes a version as the one to edit, and renames it to the version it's given.
+EDITABLE = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "WAITING_FOR_REVIEW",
+            "INVALID_BINARY"}
+
+
+def preflight():
+    """Run before deliver: stop if another version is still editable, or deliver would turn it into this one."""
+    other = [x["attributes"]["versionString"] for x in versions() if x["attributes"]["versionString"] != VERSION
+             and EDITABLE & {x["attributes"].get("appStoreState"), x["attributes"].get("appVersionState")}]
+    if other:
+        raise RuntimeError(f"version {', '.join(other)} is still open, and deliver would rename it to {VERSION}")
+    print(f"  preflight: no other version is open, so the upload goes to {VERSION}")
 
 
 def pick_build():
@@ -144,8 +157,11 @@ def attach_build():
         return
     v = version()
     if v is None:
-        return
+        raise RuntimeError(f"version {VERSION} is not in App Store Connect")
     cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data")
+    if cur and not BUILD:  # the attached build was chosen and tested; only a named build replaces it
+        print(f"  build: {cur['attributes']['version']} stays on {VERSION}; name a build number to replace it")
+        return
     b = pick_build()
     if not b:
         raise RuntimeError(no_build())
@@ -189,8 +205,7 @@ def beta(group_name=os.environ.get("BETA_GROUP", "Public Beta")):
     groups = call("GET", "/v1/betaGroups", params={"filter[app]": APP, "limit": 50})["data"]
     g = next((x for x in groups if x["attributes"]["name"] == group_name), None)
     if not g:
-        print(f"  beta: no group named {group_name!r} (groups: {', '.join(x['attributes']['name'] for x in groups)})")
-        return
+        raise RuntimeError(f"no group named {group_name!r} (groups: {', '.join(x['attributes']['name'] for x in groups)})")
     # what to test, shown to testers
     notes = os.environ.get("WHAT_TO_TEST", "").strip()
     if notes:
@@ -222,7 +237,8 @@ def beta(group_name=os.environ.get("BETA_GROUP", "Public Beta")):
 
 def manual_release():
     v = version()
-    if v is None:
+    if v is None:  # main's next version has none until its release branch is cut
+        print(f"  release: version {VERSION} is not in App Store Connect yet")
         return
     if v["attributes"].get("releaseType") == "MANUAL":
         print(f"  release: {VERSION} already manual")
@@ -234,6 +250,8 @@ def manual_release():
 
 TASKS = [t.strip() for t in os.environ.get("ASC_TASKS", "chores").split(",") if t.strip()]
 print("Tasks:", ", ".join(TASKS))
+if "preflight" in TASKS:
+    step("preflight", preflight)
 if "chores" in TASKS:
     for name, fn in [("price", price), ("availability", availability), ("age rating", age_rating), ("build", attach_build)]:
         step(name, fn)
@@ -241,6 +259,7 @@ if "beta" in TASKS:
     step("beta", beta)
 if "manual" in TASKS:
     step("manual release", manual_release)
-step("report", report)
+if "preflight" not in TASKS:  # the preflight runs before the upload, and the report after it
+    step("report", report)
 if FAILED:
     sys.exit(f"\nFailed: {', '.join(FAILED)}")

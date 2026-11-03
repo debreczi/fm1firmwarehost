@@ -145,11 +145,13 @@ Not affiliated with M-VAVE or with the hub. Flashing can leave a device needing 
 
 ## App Store
 
-Each App Store version has its own branch, `release/<major>.<minor>`, and its builds come only from there; `main`
-carries the next version. `appstore/metadata/` holds the listing (fastlane `deliver` layout). The **App Store** workflow
-(`.github/workflows/appstore.yml`, run by hand on a release branch) builds the app for the simulator, takes the
-screenshots in a demo mode (`-FM1Screenshots YES`, sample data in memory only, never on a real launch), uploads listing
-and screenshots, sets the price to free, fills the age rating, attaches a build of the branch's version (the one named
-when it is run, or else the newest processed one), and prints the status of builds and versions. It never submits for
-review. The **App Store Connect** workflow (`.github/workflows/asc.yml`) does the quicker tasks for the version of the
-branch it runs on, such as sending a build to the public TestFlight group.
+Each App Store version gets its own branch, `release/<major>.<minor>`, cut from `main` when it is ready to submit;
+`main` then carries the next version. `appstore/metadata/` holds the listing (fastlane `deliver` layout). The
+**App Store** workflow (`.github/workflows/appstore.yml`, run by hand on a release branch) builds the app for the
+simulator, takes the screenshots in a demo mode (`-FM1Screenshots YES`, sample data in memory only, never on a real
+launch), uploads listing and screenshots, sets the price to free, fills the age rating, attaches a build of the branch's
+version, and prints the status of builds and versions. It attaches the build named when it is run, or else the newest
+processed one if the version has no build yet. It stops before the upload if another version is still open in App
+Store Connect, because `deliver` would rename that one. It never submits for review. The **App Store Connect** workflow
+(`.github/workflows/asc.yml`) does the quicker tasks for the version of the branch it runs on, such as sending a build
+to the public TestFlight group.

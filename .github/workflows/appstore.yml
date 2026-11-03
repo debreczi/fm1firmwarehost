@@ -10,7 +10,7 @@ on:
         type: boolean
         default: true
       build:
-        description: "Build number to attach, such as 20261102.24 (optional; empty means the newest processed build of this branch's version)"
+        description: "Build number to attach, such as 20261102.24. Empty attaches the newest processed build of this branch's version, and only if the version has no build yet"
         default: ""
 
 jobs:
@@ -99,6 +99,7 @@ jobs:
 
       - name: App Store Connect API key
         run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography requests 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography requests
           mkdir -p ~/private_keys
           if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
             printf '%s\n' "$ASC_KEY_P8" > ~/private_keys/AuthKey_$ASC_KEY_ID.p8
@@ -112,6 +113,10 @@ jobs:
           json.dump({"key_id": "${ASC_KEY_ID}", "issuer_id": "${ASC_ISSUER_ID}", "key": key, "in_house": False},
                     open(os.path.expanduser("~/private_keys/api_key.json"), "w"))
           PY
+
+      - name: Check that no other version is open
+        if: inputs.upload
+        run: ASC_TASKS=preflight python3 appstore/asc.py
 
       - name: Upload listing and screenshots
         if: inputs.upload
@@ -136,6 +141,4 @@ jobs:
         if: always() && steps.branch.outcome == 'success'
         env:
           BUILD_NUMBER: ${{ inputs.build }}
-        run: |
-          python3 -m pip install --quiet --break-system-packages pyjwt cryptography requests 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography requests
-          python3 appstore/asc.py
+        run: python3 appstore/asc.py
