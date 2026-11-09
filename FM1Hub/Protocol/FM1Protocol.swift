@@ -116,11 +116,13 @@ enum FM1Protocol {
     }
 
     /// The device's answer: the full reply when it gave one that belongs to the plain one (the same text, or the whole
-    /// identity whose three-digit form the plain answer was), the plain reply otherwise. A chip ID in either counts.
+    /// identity whose three-digit form the plain answer was), the plain reply otherwise. A chip ID in either counts, but
+    /// one in a reply that does not belong only when it is not the first FM-1s' chip: it may warn, never hide a warning.
     static func merge(plain: FM1Hello, full: FM1Hello?) -> FM1Hello {
-        guard let full, full.identity.model == plain.identity.model,
+        guard let full else { return plain }
+        guard full.identity.model == plain.identity.model,
               full.identity.text == plain.identity.text || (plain.identity.isThreeDigits && FM1Identity.same(full.identity.text, plain.identity.text))
-        else { return plain }
+        else { return FM1Hello(identity: plain.identity, flashID: plain.flashID ?? full.flashID.flatMap { $0 == FlashChip.first ? nil : $0 }) }
         return FM1Hello(identity: full.identity, flashID: full.flashID ?? plain.flashID)
     }
 

@@ -157,11 +157,11 @@ version, a file or a backup the catalogue doesn't list, is unknown.
 | reports another ID | `any` installs; `new` and M-VAVE's get a red warning | refused, or asked as dangerous | red warning |
 | does not report it | install | red warning | red warning |
 
-The switch is off by default and matters only when the FM-1 reports its chip. The same table applies to restores and
-file installs. The check runs again at the point of no return with what the device found there reports, and stops the
-install with nothing written if that needs another answer. An install that stops after 0 requests while a firmware for
-the first FM-1s runs is reported as probably a newer FM-1 stuck on it, with a link to the hub's
-[rescue page](https://thefirmwarehub.com/tools/rescue/): holding OCT− does not help there.
+The switch is off by default and matters only when the FM-1 reports its chip. The same table applies to restores, file
+installs, M-VAVE's firmware and Resume. The check runs again at the point of no return with what the device found there reports, and stops the
+install with nothing written if that needs another answer. An install that stops after 0 requests, while a firmware not
+known to work on newer FM-1s runs and the FM-1 has not reported the first chip, says that a newer FM-1 may be stuck on
+it (holding OCT− does not help there) and links the hub's [rescue page](https://thefirmwarehub.com/tools/rescue/).
 
 ## Licence
 

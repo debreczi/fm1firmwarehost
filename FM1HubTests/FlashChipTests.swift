@@ -7,8 +7,8 @@ final class FlashChipTests: XCTestCase {
     private let other: UInt32 = 0x12_3456
     private let all: [ChipSupport] = [.new, .any, .old, .official, .unknown]
 
-    private func v(_ device: DeviceFlash, _ package: ChipSupport, unsafe: Bool = false) -> ChipVerdict {
-        ChipGuard.verdict(device: device, package: package, allowUnsafe: unsafe)
+    private func v(_ device: DeviceFlash, _ package: ChipSupport, allow: Bool = false) -> ChipVerdict {
+        ChipGuard.verdict(device: device, package: package, allowUnsafe: allow)
     }
 
     func testTheKnownChips() {
@@ -21,42 +21,42 @@ final class FlashChipTests: XCTestCase {
 
     func testTheFirstChipTakesEveryFirmware() {
         for p in all {
-            for unsafe in [false, true] { XCTAssertEqual(v(.reported(FlashChip.first), p, unsafe: unsafe), .install, "\(p)") }
+            for allow in [false, true] { XCTAssertEqual(v(.reported(FlashChip.first), p, allow: allow), .install, "\(p)") }
         }
     }
 
     func testTheNewerChip() {
         let newer = DeviceFlash.reported(FlashChip.newer)
-        for unsafe in [false, true] {
-            XCTAssertEqual(v(newer, .new, unsafe: unsafe), .install)
-            XCTAssertEqual(v(newer, .any, unsafe: unsafe), .install)
-            XCTAssertEqual(v(newer, .official, unsafe: unsafe), .install, "newer FM-1s ship with M-VAVE's firmware")
-            XCTAssertEqual(v(newer, .unknown, unsafe: unsafe), .warn(.newerChipUnknownPackage), "a warning, never a refusal")
+        for allow in [false, true] {
+            XCTAssertEqual(v(newer, .new, allow: allow), .install)
+            XCTAssertEqual(v(newer, .any, allow: allow), .install)
+            XCTAssertEqual(v(newer, .official, allow: allow), .install, "newer FM-1s ship with M-VAVE's firmware")
+            XCTAssertEqual(v(newer, .unknown, allow: allow), .warn(.newerChipUnknownPackage), "a warning, never a refusal")
         }
         XCTAssertEqual(v(newer, .old), .refused(FlashChip.newer), "the switch is off: refused")
-        XCTAssertEqual(v(newer, .old, unsafe: true), .dangerous(FlashChip.newer), "the switch is on: asked as dangerous")
+        XCTAssertEqual(v(newer, .old, allow: true), .dangerous(FlashChip.newer), "the switch is on: asked as dangerous")
     }
 
     func testAThirdChip() {
         let third = DeviceFlash.reported(other)
-        for unsafe in [false, true] {
-            XCTAssertEqual(v(third, .any, unsafe: unsafe), .install, "it does not check the chip")
-            XCTAssertEqual(v(third, .new, unsafe: unsafe), .warn(.unknownChip(other)), "it knows only the two chips")
-            XCTAssertEqual(v(third, .official, unsafe: unsafe), .warn(.unknownChip(other)))
-            XCTAssertEqual(v(third, .unknown, unsafe: unsafe), .warn(.unknownChip(other)))
+        for allow in [false, true] {
+            XCTAssertEqual(v(third, .any, allow: allow), .install, "it does not check the chip")
+            XCTAssertEqual(v(third, .new, allow: allow), .warn(.unknownChip(other)), "it knows only the two chips")
+            XCTAssertEqual(v(third, .official, allow: allow), .warn(.unknownChip(other)))
+            XCTAssertEqual(v(third, .unknown, allow: allow), .warn(.unknownChip(other)))
         }
         XCTAssertEqual(v(third, .old), .refused(other), "a first-FM-1 firmware accepts only the first chip")
-        XCTAssertEqual(v(third, .old, unsafe: true), .dangerous(other))
+        XCTAssertEqual(v(third, .old, allow: true), .dangerous(other))
     }
 
     /// Most of the time: M-VAVE's firmware and most others never say. The switch does not matter here.
     func testNotReported() {
-        for unsafe in [false, true] {
-            XCTAssertEqual(v(.notReported, .new, unsafe: unsafe), .install)
-            XCTAssertEqual(v(.notReported, .any, unsafe: unsafe), .install, "no note")
-            XCTAssertEqual(v(.notReported, .official, unsafe: unsafe), .install)
-            XCTAssertEqual(v(.notReported, .old, unsafe: unsafe), .warn(.oldPackage))
-            XCTAssertEqual(v(.notReported, .unknown, unsafe: unsafe), .warn(.unknownPackage))
+        for allow in [false, true] {
+            XCTAssertEqual(v(.notReported, .new, allow: allow), .install)
+            XCTAssertEqual(v(.notReported, .any, allow: allow), .install, "no note")
+            XCTAssertEqual(v(.notReported, .official, allow: allow), .install)
+            XCTAssertEqual(v(.notReported, .old, allow: allow), .warn(.oldPackage))
+            XCTAssertEqual(v(.notReported, .unknown, allow: allow), .warn(.unknownPackage))
         }
     }
 
@@ -198,6 +198,9 @@ final class IdentityReplyTests: XCTestCase {
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("FM-1_9001")), hello("FM-1_9001"), "felucca-bsp shortens FM-1_9001 to FM-1_900")
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("SMK_9001")), hello("FM-1_900"), "another model")
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_6010000"), full: hello("FM-1_601")), hello("FM-1_6010000"))
+        // a chip in a reply that does not belong may add a warning, never take one away
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601"), full: hello("FM-1_7010000", FlashChip.newer)), hello("FM-1_601", FlashChip.newer))
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601"), full: hello("FM-1_7010000", FlashChip.first)), hello("FM-1_601"))
     }
 
     func testTheShortFormNamesTheSameFirmware() {

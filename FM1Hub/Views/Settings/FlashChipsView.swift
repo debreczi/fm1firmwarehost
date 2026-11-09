@@ -32,7 +32,7 @@ struct FlashChipsView: View {
                 rule("Reports \(FlashChip.hex(FlashChip.newer))", "A firmware for the first FM-1s only is refused, or, with Allow installing on unsafe FM-1s on, asked about as dangerous. An unknown one gets a red warning. The rest install.")
                 rule("Reports another ID", "A firmware for the first FM-1s only is treated as above. One made for the newer chip, M-VAVE's own and an unknown one get a red warning. One that doesn't check the chip installs.")
                 rule("Doesn't report it", "A firmware for the first FM-1s only and an unknown one get a red warning. The rest install.")
-            } header: { Text("What the app does") } footer: { Text("The same applies to restoring a backup and to installing a file. The check runs again just before anything is written, with what the FM-1 reports then.") }
+            } header: { Text("What the app does") } footer: { Text("The same applies to restoring a backup, installing a file or M-VAVE's firmware, and Resume. The check runs again just before anything is written, with what the FM-1 reports then.") }
 
             Section {
                 Text("A bricked FM-1 can almost always be rescued, but only from a computer: iOS can't do it.")

@@ -21,7 +21,7 @@ final class FM1ErrorTests: XCTestCase {
         XCTAssertFalse(FM1Error.cancelled.nothingWritten, "a cancel can land in the middle of a write")
         XCTAssertTrue(FM1Error.backup("").nothingWritten, "a backup only reads")
         XCTAssertEqual(FM1Error.backup("").hint, "", "and the advice for a stopped update does not apply to it")
-        XCTAssertTrue(FM1Error.unsafe("").nothingWritten, "the flash chip check stops before the first byte")
+        XCTAssertTrue(FM1Error.chipCheck("").nothingWritten, "the flash chip check stops before the first byte")
         XCTAssertFalse(FM1Error.noRequests("").nothingWritten, "as a stopped step 1")
         XCTAssertFalse(FM1Error.stuck("").nothingWritten)
         XCTAssertEqual(FM1Error.stuck("").helpURL, HubAPI.rescue, "a stuck FM-1 needs a computer")
@@ -31,7 +31,7 @@ final class FM1ErrorTests: XCTestCase {
     func testEveryErrorHasItsOwnCodeAndSomethingToSay() {
         let all: [FM1Error] = [.notFound("a"), .model("a"), .stopped("a"), .lost("a"), .noLoader("a"),
                                .noReturn("a"), .mismatch("a"), .badRequest("a"), .foreign("a"), .package("a"),
-                               .protocolError("a"), .midi("a"), .backup("a"), .noRequests("a"), .unsafe("a"), .stuck("a"), .cancelled]
+                               .protocolError("a"), .midi("a"), .backup("a"), .noRequests("a"), .chipCheck("a"), .stuck("a"), .cancelled]
         XCTAssertEqual(Set(all.map(\.code)).count, all.count, "the UI hints off these codes, so they must be distinct")
         for e in all {
             XCTAssertFalse((e.errorDescription ?? "").isEmpty, "\(e.code) has no message")

@@ -99,21 +99,21 @@ enum ChipVerdict: Equatable, Hashable {
 /// The decision table. The README and the Flash chips page describe it; the tests pin every cell.
 enum ChipGuard {
     static func verdict(device: DeviceFlash, package: ChipSupport, allowUnsafe: Bool) -> ChipVerdict {
-        let unsafe: (UInt32) -> ChipVerdict = { allowUnsafe ? .dangerous($0) : .refused($0) }
+        let refuseOrAsk: (UInt32) -> ChipVerdict = { allowUnsafe ? .dangerous($0) : .refused($0) }
         switch device {
         case .reported(let id) where id == FlashChip.first:
             return .install
         case .reported(let id) where id == FlashChip.newer:
             switch package {
             case .new, .any, .official: return .install
-            case .old: return unsafe(id)
+            case .old: return refuseOrAsk(id)
             case .unknown: return .warn(.newerChipUnknownPackage)
             }
         case .reported(let id):
             // a third chip: a first-FM-1 firmware accepts only the first chip, a newer-chip one only the two known
             switch package {
             case .any: return .install
-            case .old: return unsafe(id)
+            case .old: return refuseOrAsk(id)
             case .new, .official, .unknown: return .warn(.unknownChip(id))
             }
         case .notReported:
@@ -183,9 +183,9 @@ enum ChipGuard {
         switch now {
         case .refused: return text(now)
         case .dangerous(let id):
-            return "Your FM-1 reported \(chipPhrase(id)) just now, and this firmware is made for the first FM-1s only: it may brick your FM-1. Nothing was installed. Press Install again to decide."
+            return "Your FM-1 reported \(chipPhrase(id)) just now, and this firmware is made for the first FM-1s only: it may brick your FM-1. Nothing was installed. Start it again to decide."
         case .warn:
-            return text(now) + " Nothing was installed. Press Install again to decide."
+            return text(now) + " Nothing was installed. Start it again to decide."
         case .install: return ""
         }
     }

@@ -123,7 +123,7 @@ enum FM1Error: LocalizedError {
     /// Step 1 never started: the running firmware asked for nothing.
     case noRequests(String)
     /// The flash chip check stopped the install before anything was sent.
-    case unsafe(String)
+    case chipCheck(String)
     /// Probably a newer FM-1 on a firmware for the first FM-1s: it can't update itself any more.
     case stuck(String)
     case cancelled
@@ -144,7 +144,7 @@ enum FM1Error: LocalizedError {
         case .midi: return "midi"
         case .backup: return "backup"
         case .noRequests: return "norequests"
-        case .unsafe: return "unsafe"
+        case .chipCheck: return "chip"
         case .stuck: return "stuck"
         case .cancelled: return "cancelled"
         }
@@ -154,7 +154,7 @@ enum FM1Error: LocalizedError {
         switch self {
         case .notFound(let s), .model(let s), .stopped(let s), .lost(let s), .noLoader(let s), .noReturn(let s),
              .mismatch(let s), .badRequest(let s), .foreign(let s), .package(let s), .protocolError(let s), .midi(let s), .backup(let s),
-             .noRequests(let s), .unsafe(let s), .stuck(let s):
+             .noRequests(let s), .chipCheck(let s), .stuck(let s):
             return s
         case .cancelled: return "Cancelled."
         }
@@ -165,7 +165,7 @@ enum FM1Error: LocalizedError {
     /// mid-write or cannot be told apart from one, so it counts as "the device may have been touched".
     var nothingWritten: Bool {
         switch self {
-        case .notFound, .model, .foreign, .package, .midi, .backup, .unsafe: return true
+        case .notFound, .model, .foreign, .package, .midi, .backup, .chipCheck: return true
         case .stopped, .lost, .noLoader, .noReturn, .mismatch, .badRequest, .protocolError, .cancelled, .noRequests, .stuck: return false
         }
     }
@@ -175,10 +175,11 @@ enum FM1Error: LocalizedError {
         switch self {
         case .notFound: return "Plug the FM-1 in by USB, close other MIDI apps, then try again."
         case .noLoader: return "Still stuck? Hold OCT− while switching the FM-1 on, then press Install again."
-        case .lost, .stopped, .noRequests: return "Replug the USB cable and press Install again: the device stays in update mode until it is finished."
+        case .lost, .stopped: return "Replug the USB cable and press Install again: the device stays in update mode until it is finished."
+        case .noRequests: return "Replug the USB cable and press Install again."
         case .noReturn: return "Power-cycle the FM-1. If it does not start, hold OCT− while switching it on and install again."
-        case .stuck: return "Holding OCT− won't help here. It needs a computer: the hub's rescue page shows how."
-        case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup, .unsafe: return ""
+        case .stuck: return "A newer FM-1 stuck like this needs a computer: the hub's rescue page shows how. Otherwise, replug the USB cable and press Install again."
+        case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup, .chipCheck: return ""
         }
     }
 
