@@ -9,6 +9,8 @@ struct FM1Device {
     let link: MIDILink
     let identity: FM1Identity
     let portName: String
+    /// Its flash chip's JEDEC ID, when the running firmware reported it.
+    var flashID: UInt32? = nil
 }
 
 /// The steps of an install, for the progress view.
@@ -75,17 +77,38 @@ final class FM1Updater {
         probeAll || FM1Protocol.mayProbe(name) || chosenPorts.contains(name)
     }
 
-    func handshake(_ link: MIDILink, tries: Int = 3) async -> FM1Identity? {
+    /// Plain identities whose firmware did not answer the full request on that port, so a search that asks again and
+    /// again (waiting for the loader, or for the device to come back) does not wait for it each time.
+    private var noFullAnswer: Set<String> = []
+
+    /// The plain identity request, then the full one where it may be known (see `FM1Protocol.asksFullIdentity`). A
+    /// device that does not answer the full one keeps its plain answer.
+    func handshake(_ link: MIDILink, tries: Int = 3) async -> FM1Hello? {
         link.drain()
-        for _ in 0..<tries {
+        var plain: FM1Hello?
+        tryLoop: for _ in 0..<tries {
             guard link.send(FM1Protocol.handshakeQuery) else { return nil }
             let end = Date().addingTimeInterval(1.0)
             while Date() < end {
                 guard let p = await link.read(timeout: end.timeIntervalSinceNow) else { break }
-                if let id = FM1Protocol.parseIdentity(p) { return id }
+                if let h = FM1Protocol.parseHello(p) { plain = h; break tryLoop }
             }
         }
-        return nil
+        guard let plain else { return nil }
+        let key = link.name + "\u{0}" + plain.identity.text
+        guard FM1Protocol.asksFullIdentity(after: plain.identity), !noFullAnswer.contains(key) else { return plain }
+        link.drain()   // an answer to a repeated plain request is not the full one
+        guard link.send(FM1Protocol.fullHandshakeQuery) else { return plain }
+        let end = Date().addingTimeInterval(0.5)
+        while Date() < end {
+            guard let p = await link.read(timeout: end.timeIntervalSinceNow) else { break }
+            guard let full = FM1Protocol.parseHello(p) else { continue }
+            // a reply that says no more than the plain one may be a late copy of it: the full one can still come
+            if full.identity.text != plain.identity.text || full.flashID != nil { return FM1Protocol.merge(plain: plain, full: full) }
+        }
+        // nothing more to learn from this firmware here: not answered, or answered with no more than the plain reply
+        noFullAnswer.insert(key)
+        return plain
     }
 
     /// Every in/out pair whose name may be an FM-1 that answers the handshake. The caller closes the link.
@@ -94,9 +117,9 @@ final class FM1Updater {
             if !mayProbe(src.name) { continue }
             guard let dest = engine.destination(for: src.endpoint, named: src.name) else { continue }
             guard let link = engine.open(source: src.endpoint, destination: dest, name: src.name) else { continue }
-            if let id = await handshake(link, tries: 2), filter(id) {
-                log("found \(id.text) on \(src.name)")
-                return FM1Device(link: link, identity: id, portName: src.name)
+            if let h = await handshake(link, tries: 2), filter(h.identity) {
+                log("found \(h.identity.text) on \(src.name)" + (h.flashID.map { ", flash \(FlashChip.hex($0))" } ?? ""))
+                return FM1Device(link: link, identity: h.identity, portName: src.name, flashID: h.flashID)
             }
             link.close()
             await sleep(ms: 100)
@@ -162,11 +185,11 @@ final class FM1Updater {
     /// Called at the point of no return: the device this attempt found has been checked, and the next thing that
     /// happens is a write. The identity handed over is that device's own, so a caller recording what it is about to
     /// do records something it has just seen rather than something it remembers. Throwing aborts the attempt with
-    /// nothing written.
-    typealias BeforeWriting = @MainActor (FM1Identity) throws -> Void
+    /// nothing written. The flash chip's ID comes with it when that device reported one.
+    typealias BeforeWriting = @MainActor (FM1Identity, UInt32?) throws -> Void
 
     /// Full install: running firmware -> loader -> new firmware. Returns the identity the device reports after.
-    func install(image: [UInt8], product: String, beforeWriting: BeforeWriting = { _ in },
+    func install(image: [UInt8], product: String, beforeWriting: BeforeWriting = { _, _ in },
                  onStep: @escaping (InstallStep) -> Void) async throws -> String {
         guard let dev = await find({ !$0.isLoader }) else {
             if cancelled { throw FM1Error.cancelled }
@@ -182,7 +205,7 @@ final class FM1Updater {
             throw FM1Error.cancelled
         }
         do {
-            try await beforeWriting(dev.identity)
+            try await beforeWriting(dev.identity, dev.flashID)
         } catch {
             dev.link.close()
             throw error
@@ -201,7 +224,9 @@ final class FM1Updater {
         if !s1.finished {
             let what = s1.lost ? "was disconnected" : "stopped"
             let msg = "The device \(what) after \(s1.served) requests: nothing was written."
-            throw s1.lost ? FM1Error.lost(msg) : FM1Error.stopped(msg)
+            if s1.lost { throw FM1Error.lost(msg) }
+            // the running firmware never started the update: how a newer FM-1 on a first-FM-1 firmware looks
+            throw s1.served == 0 ? FM1Error.noRequests(msg) : FM1Error.stopped(msg)
         }
         onStep(.loader)
         await sleep(ms: 3000)
@@ -227,7 +252,7 @@ final class FM1Updater {
             throw FM1Error.noReturn("The device did not come back: power-cycle it.")
         }
         back.link.close()
-        if back.identity.text != product {
+        if !FM1Identity.same(back.identity.text, product) {
             throw FM1Error.mismatch("Installed, but the device reports \(back.identity.text).")
         }
         onStep(.done(back.identity.text))
@@ -254,7 +279,7 @@ final class FM1Updater {
     /// and is always verified against the restarted device. `stockLoader` says whose loader may be resumed: by
     /// default only the hub's own, because another firmware's loader may lay the image out differently; a package of
     /// the official family is written from the official loader, as M-UPGRADE would.
-    func resume(image: [UInt8], expectedProduct: String, stockLoader: Bool, beforeWriting: BeforeWriting = { _ in },
+    func resume(image: [UInt8], expectedProduct: String, stockLoader: Bool, beforeWriting: BeforeWriting = { _, _ in },
                 onStep: @escaping (InstallStep) -> Void) async throws -> ResumeOutcome {
         guard let ota = await find({ $0.isLoader }) else {
             if cancelled { throw FM1Error.cancelled }
@@ -274,7 +299,7 @@ final class FM1Updater {
             throw FM1Error.cancelled
         }
         do {
-            try await beforeWriting(ota.identity)
+            try await beforeWriting(ota.identity, ota.flashID)
         } catch {
             ota.link.close()
             throw error
@@ -289,7 +314,7 @@ final class FM1Updater {
             throw FM1Error.noReturn("The FM-1 did not come back after the write: power-cycle it.")
         }
         back.link.close()
-        if back.identity.text != expectedProduct {
+        if !FM1Identity.same(back.identity.text, expectedProduct) {
             throw FM1Error.mismatch("Written, but the FM-1 reports \(back.identity.text).")
         }
         onStep(.done(back.identity.text))

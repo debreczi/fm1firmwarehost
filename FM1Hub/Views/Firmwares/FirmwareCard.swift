@@ -1,5 +1,30 @@
 import SwiftUI
 
+/// Which flash chips a firmware works on, as a chip on its card. A firmware that does not check the chip gets none.
+struct ChipSupportChip: View {
+    let support: ChipSupport
+    var filled = false
+
+    var body: some View {
+        switch support {
+        case .new: Chip(text: "newer FM-1s too", icon: "checkmark", tint: Theme.ok, filled: filled)
+        case .old: Chip(text: "first FM-1s only", icon: "exclamationmark.triangle", tint: Theme.warn, filled: filled)
+        case .any, .official, .unknown: EmptyView()
+        }
+    }
+
+    /// The Flash chip line of a firmware's facts, in the hub's words; none for a firmware that does not check the chip.
+    static func fact(_ support: ChipSupport) -> String? {
+        switch support {
+        case .new: return "Every FM-1, the newer chip too"
+        case .old: return "The first FM-1s only"
+        case .unknown: return "Not stated by the hub"
+        case .official: return "Every FM-1 (M-VAVE's own)"
+        case .any: return nil
+        }
+    }
+}
+
 /// One firmware as a card: its screen, the facts that matter, the Install key.
 struct FirmwareCard: View {
     @Environment(DeviceController.self) private var device
@@ -34,6 +59,7 @@ struct FirmwareCard: View {
                         HStack(spacing: 6) {
                             ForEach(firmware.allKinds, id: \.self) { k in Chip(text: Kinds.label(k), icon: Kinds.icon(k), tint: k == "vintage" ? Theme.warm : c) }
                             if let h = firmware.hid, !h.kinds.isEmpty { Chip(text: "USB \(h.kinds.joined(separator: "/"))", icon: "keyboard", tint: Theme.warn) }
+                            ChipSupportChip(support: firmware.chipSupport)
                         }
                         Text(firmware.what).font(.system(size: 14)).foregroundStyle(.white.opacity(0.82)).lineLimit(3).multilineTextAlignment(.leading)
                         HStack(spacing: 10) {

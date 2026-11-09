@@ -11,6 +11,7 @@ struct DeviceView: View {
     @State private var askName = false
     @State private var snapshotName = ""
     @State private var showLog = false
+    @State private var filePrompt: InstallPrompt?
 
     var body: some View {
         NavigationStack {
@@ -29,8 +30,9 @@ struct DeviceView: View {
             .hubBackground()
             .navigationTitle("Your FM-1")
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .item], allowsMultipleSelection: false) { result in
-                if case .success(let urls) = result, let u = urls.first { device.installFile(u) }
+                if case .success(let urls) = result, let u = urls.first { askFile(u) }
             }
+            .installPrompt($filePrompt) { settings.newerChipOnly = true; settings.tab = 0 }
             .confirmationDialog(confirmOfficialLatest ? "Install M-VAVE's current firmware\(device.officialLatestVersion.map { " (\($0))" } ?? "")?" : "Back to the official V15?", isPresented: $confirmStock, titleVisibility: .visible) {
                 Button(confirmOfficialLatest ? "Install the latest official" : "Install V15") { device.installOfficial(latest: confirmOfficialLatest) }
                 Button("Cancel", role: .cancel) {}
@@ -48,6 +50,16 @@ struct DeviceView: View {
                 Text("Saves which firmware is on the FM-1 and its package; on Felucca and SLOOP firmwares, the music, settings, projects and samples too.")
             }
         }
+    }
+
+    /// A file is installed at once, as before, unless the flash chip check has something to say.
+    private func askFile(_ u: URL) {
+        guard let picked = device.pickedPackage(u) else { device.installFile(u); return }   // the install says what is wrong
+        let verdict = device.chipVerdict(picked.support)
+        if verdict == .install { device.installFile(u); return }
+        let name = picked.firmware.map { "\($0.name) \($0.version)" } ?? u.lastPathComponent
+        filePrompt = InstallPrompt(title: "Install \(name) from the file?", message: "\(u.lastPathComponent), \(picked.package.product).",
+                                   confirm: "Install", verdict: verdict) { consent in device.installFile(u, consent: consent) }
     }
 
     private func versionLine(_ f: Firmware, exact: Bool, reports: String) -> String {
@@ -83,6 +95,10 @@ struct DeviceView: View {
                     }
                 }
                 Spacer(minLength: 0)
+            }
+            if let chip = device.flashChip, device.isConnected {
+                Label("Flash chip: \(chip.summary)", systemImage: "memorychip")
+                    .font(.system(size: 12)).foregroundStyle(chip == .notReported ? Theme.textDim : Theme.ok)
             }
             if let s = device.musicBackupSupported, device.isConnected {
                 Label(s ? (device.musicWritesBack ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "Backup saves this firmware's music too, but the app can't put it back. Its own web editor may open the file.") : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",

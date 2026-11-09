@@ -34,6 +34,8 @@ struct Firmware: Codable, Identifiable, Hashable {
     let stars: Int?
     let installs: Int?
     let hid: HID?
+    /// Which flash chips it works on, as the hub reads it from the package: "new", "any" or "old".
+    let chip: String?
 
     struct HID: Codable, Hashable {
         let keyboard: Bool?
@@ -43,7 +45,7 @@ struct Firmware: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, author, version, what, kind, ambient, vintage, beta, pkg, product, size, sha256, ident, repo, site, source,
-             release, editor, play, cheat, talk, install, loader, lic, tag, date, added, published, stars, installs, hid
+             release, editor, play, cheat, talk, install, loader, lic, tag, date, added, published, stars, installs, hid, chip
     }
 
     init(from decoder: Decoder) throws {
@@ -81,6 +83,7 @@ struct Firmware: Codable, Identifiable, Hashable {
         stars = try? c.decodeIfPresent(Int.self, forKey: .stars)
         installs = try? c.decodeIfPresent(Int.self, forKey: .installs)
         hid = try? c.decodeIfPresent(HID.self, forKey: .hid)
+        chip = try? c.decodeIfPresent(String.self, forKey: .chip)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -96,8 +99,12 @@ struct Firmware: Codable, Identifiable, Hashable {
         try c.encodeIfPresent(install, forKey: .install); try c.encodeIfPresent(loader, forKey: .loader); try c.encodeIfPresent(lic, forKey: .lic)
         try c.encodeIfPresent(tag, forKey: .tag); try c.encodeIfPresent(date, forKey: .date); try c.encodeIfPresent(added, forKey: .added)
         try c.encodeIfPresent(published, forKey: .published); try c.encodeIfPresent(stars, forKey: .stars); try c.encodeIfPresent(installs, forKey: .installs)
-        try c.encodeIfPresent(hid, forKey: .hid)
+        try c.encodeIfPresent(hid, forKey: .hid); try c.encodeIfPresent(chip, forKey: .chip)
     }
+
+    /// Which flash chips this package works on. The hub's catalogue lists only each firmware's newest version, so this
+    /// is for this very package (by its SHA-256), not for other versions of the firmware.
+    var chipSupport: ChipSupport { ChipSupport(catalogValue: chip) }
 
     /// The kinds a filter can tick: the type(s), plus "ambient" and "vintage" when they hold.
     var allKinds: [String] { kinds + (ambient ? ["ambient"] : []) + (vintage ? ["vintage"] : []) }
@@ -202,6 +209,8 @@ enum HubAPI {
     static let knowledgeBase = URL(string: "https://thefirmwarehub.com/kb/")!
     static let creatorsPage = URL(string: "https://thefirmwarehub.com/creators/")!
     static let submit = URL(string: "https://thefirmwarehub.com/submit/")!
+    /// Getting a stuck FM-1 back from a computer, and how to read its flash chip there.
+    static let rescue = URL(string: "https://thefirmwarehub.com/tools/rescue/")!
     static let stockDownload = URL(string: "https://www.m-vave.com/download")!
     /// M-VAVE's current official FM-1 firmware, the file behind "PC Firmware > FM-1" on m-vave.com/download.
     static let officialLatest = URL(string: "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc")!

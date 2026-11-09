@@ -13,7 +13,7 @@ Files app, so you can copy them to iCloud Drive or a computer).
 | --- | --- |
 | **Firmwares** | Live catalogue from `thefirmwarehub.com/catalog.json` (cached for offline). Cards with the firmware's own screen, maker, version, kind tags, beta badge, installs/stars, description. Search, type/style filters (synths, grooveboxes, drums & samplers, chords, trackers, dev, ambient, vintage), sort (installs, newest, added, name, stars), list or grid. Detail page with a facts table (release date, identity, size, SHA-256, licence, your installs) and links (project, release, source, editor, play in browser, cheat sheet, feedback). |
 | **Official firmware** | One tap for M-VAVE's current release (fetched from their download server, identity read from the file, so a new official version appears without an app update) and one tap for the V15 recovery image the hub keeps. |
-| **Install** | The same two-step USB-MIDI update protocol the hub and M-VAVE's updater use: handshake, step 1 (the running firmware stages the loader), step 2 (the loader writes the image), restart, identity check. Packages are checked against the catalogue (size, SHA-256, package identity) before a byte is written. Resumes an interrupted update when the FM-1 is left in update mode. Back to the official V15 (exact file only). Install a `.fwsc` from the Files app (GitHub release, or M-VAVE's own file). |
+| **Install** | The same two-step USB-MIDI update protocol the hub and M-VAVE's updater use: handshake, step 1 (the running firmware stages the loader), step 2 (the loader writes the image), restart, identity check. Packages are checked against the catalogue (size, SHA-256, package identity) before a byte is written. Resumes an interrupted update when the FM-1 is left in update mode. Back to the official V15 (exact file only). Install a `.fwsc` from the Files app (GitHub release, or M-VAVE's own file). Warns before, or refuses, a firmware that may brick a newer FM-1 (see [Flash chips](#flash-chips-and-newer-fm-1s)). |
 | **Backups** | A backup saves which firmware is on the FM-1 and keeps its package so it can be put back later, one tap. The package is found automatically: first the hub's catalogue, or the maker's GitHub releases if the firmware names a version the hub doesn't have. A firmware the hub doesn't know is looked for on the phone (every package the app ever installed is kept, about 0.6 MB each), on M-VAVE's server for official versions and in its maker's releases. On Felucca-family firmwares (Felucca and those built on it that answer its backup protocol, such as Melodee, Ghoulbox and ChoralRoot) and on SLOOP and the firmwares built on it that answer its protocol, it also reads the **music archive** over USB: current music, settings, projects, user banks, FM6 patches, sample slots. Restore the firmware, restore the archive. The archive file is the editor's own (`felucca-backup` or `sloop-backup` v1 JSON), so it opens there too. The app writes a `sloop-backup` back only to SLOOP: on a firmware built on SLOOP it saves the music but can't put it back, and that firmware's own web editor may or may not open the file. Many firmwares report the same identity: when the firmware can't name itself, you choose it in the backup. Optional automatic backup before every install, on firmwares whose music the app can back up. |
 | **History** | Every install: what, when, from where (hub, backup, file, official), identity before and after, success or the error. |
 | **Device** | Connect / identify, MIDI port list with "this is my FM-1" for firmwares that name their port after themselves, resume card when a loader is waiting, log. |
@@ -123,6 +123,45 @@ A name with another version than the hub's fetches that version from the firmwar
 there. If not, a firmware alone on its identity gets the hub's version, marked as such, and on a shared identity the
 app looks for no package and the user chooses the firmware, in the backup. The list of firmwares comes
 from the hub's catalogue, so a new firmware or version needs no app update.
+
+## Flash chips and newer FM-1s
+
+FM-1s are made with two different flash chips. A firmware written before the newer chip can't save or start another
+update on it, so the FM-1 is stuck on that firmware (bricked) until it is rescued from a computer, through the ROM
+download mode. The app checks these chips, by the JEDEC ID each one answers with (`FlashChip` in
+`FM1Hub/Models/FlashChip.swift`; the app's Settings › Flash chips page says the same):
+
+| JEDEC ID | Chip | FM-1s |
+| --- | --- | --- |
+| `0x856014` | Puya P25Q80 | The first FM-1s. |
+| `0xB36014` | UCUN UC25HQ80 | FM-1s sold since autumn 2026, usually with the M-VAVE logo under the screen. |
+
+**How the app learns the chip.** Only from the running firmware. After the plain identity request (cmd `0x11`, no
+body) the app sends the full one (cmd `0x11` with the one-byte body `01`, PERF-1's scheme in felucca-bsp and ESTAMPIE)
+to every firmware except M-VAVE's own (`FM-1_0xx`), the USB rescue mode and update loaders. A firmware that knows it
+answers with its whole identity and may put the chip's ID in bytes 24–26 of the 27-byte reply, high byte first (0: not
+read). The reply's text ends at its first zero. M-VAVE's firmware never reports the chip, so most of the time it is
+"not reported" and a newer FM-1 can't be told from a first one.
+
+**Which firmwares work on it.** The hub's catalogue has a `chip` field for each firmware, which the hub reads from the
+package: `new` (every FM-1, the newer chip too), `old` (the first FM-1s only) or `any` (does not check the chip). It
+describes the catalogue's package, by SHA-256. M-VAVE's own firmware works on both. Anything else, such as an older
+version, a file or a backup the catalogue doesn't list, is unknown.
+
+**What the app does** (`ChipGuard.verdict`, tested cell by cell in `FlashChipTests`):
+
+| The FM-1 | `new`, `any`, M-VAVE's | `old` | unknown |
+| --- | --- | --- | --- |
+| reports `0x856014` | install | install | install |
+| reports `0xB36014` | install | refused; with *Allow installing on unsafe FM-1s* on, asked as dangerous | red warning |
+| reports another ID | `any` installs; `new` and M-VAVE's get a red warning | refused, or asked as dangerous | red warning |
+| does not report it | install | red warning | red warning |
+
+The switch is off by default and matters only when the FM-1 reports its chip. The same table applies to restores and
+file installs. The check runs again at the point of no return with what the device found there reports, and stops the
+install with nothing written if that needs another answer. An install that stops after 0 requests while a firmware for
+the first FM-1s runs is reported as probably a newer FM-1 stuck on it, with a link to the hub's
+[rescue page](https://thefirmwarehub.com/tools/rescue/): holding OCT− does not help there.
 
 ## Licence
 

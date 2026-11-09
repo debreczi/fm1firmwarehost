@@ -4,11 +4,11 @@ struct RootView: View {
     @Environment(DeviceController.self) private var device
     @Environment(CatalogStore.self) private var catalog
     @Environment(AppSettings.self) private var settings
-    @State private var tab = Demo.isOn ? Demo.tab : 0
 
     var body: some View {
         @Bindable var device = device
-        TabView(selection: $tab) {
+        @Bindable var settings = settings
+        TabView(selection: $settings.tab) {
             FirmwareListView()
                 .tabItem { Label("Firmwares", systemImage: "square.grid.2x2.fill") }
                 .tag(0)

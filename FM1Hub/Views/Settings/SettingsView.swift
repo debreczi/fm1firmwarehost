@@ -32,6 +32,14 @@ struct SettingsView: View {
                 } header: { Text("MIDI") } footer: { Text("Port names you marked as your FM-1. Swipe to forget one.") }
 
                 Section {
+                    Toggle(isOn: $settings.allowUnsafeInstalls) {
+                        Text("Allow installing on unsafe FM-1s")
+                        Text("Matters only when your FM-1 reports the newer flash chip. Off: a firmware made for the first FM-1s is refused. On: you are asked first, every time, and it is still dangerous.").font(.footnote)
+                    }
+                    NavigationLink { FlashChipsView() } label: { Text("Flash chips: what the app checks") }
+                } header: { Text("Newer FM-1s") } footer: { Text("When the FM-1 doesn't report its chip, which is most of the time, a red warning comes before every firmware that may brick a newer FM-1, whatever this switch says.") }
+
+                Section {
                     LabeledContent("Packages", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
                     LabeledContent("Backups", value: ByteCountFormatter.string(fromByteCount: library.snapshotsSize(), countStyle: .file))
                     LabeledContent("Catalogue", value: catalog.updated ?? "–")

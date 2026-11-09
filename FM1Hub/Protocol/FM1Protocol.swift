@@ -33,6 +33,29 @@ struct FM1Identity: Equatable, Hashable, Codable {
         guard !model.isEmpty, !digits.isEmpty, digits.allSatisfy({ $0.isNumber }), !model.contains("_") else { return nil }
         return FM1Identity(text: text, model: model, version: Int(digits) ?? Int(digits.prefix(9)) ?? 0)
     }
+
+    /// The name, "_" and exactly three digits: what M-UPGRADE 3.11 takes, and what firmwares built on felucca-bsp answer
+    /// the plain query with when their own identity is longer ("FM-1_6010000" -> "FM-1_601").
+    var isThreeDigits: Bool {
+        guard let us = text.lastIndex(of: "_") else { return false }
+        return text[text.index(after: us)...].count == 3
+    }
+
+    /// Do two identities name the same firmware? The same text, or one is the three-digit form of the other, which a
+    /// firmware answers when it does not answer the full identity request.
+    static func same(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        let (short, long) = a.count < b.count ? (a, b) : (b, a)
+        guard let s = parse(text: short), s.isThreeDigits, let l = parse(text: long), l.model == s.model, !s.isLoader,
+              long.hasPrefix(short) else { return false }
+        return true
+    }
+}
+
+/// What an FM-1 answered to the identity request: its identity, and its flash chip's JEDEC ID when it sends one.
+struct FM1Hello: Equatable {
+    let identity: FM1Identity
+    let flashID: UInt32?
 }
 
 /// A cmd 0x30 read request from the device.
@@ -43,7 +66,12 @@ struct FM1ReadRequest {
 }
 
 enum FM1Protocol {
+    /// The identity request, as M-UPGRADE sends it: cmd 0x11 with no body.
     static let handshakeQuery: [UInt8] = [0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7]
+    /// The full identity request: cmd 0x11 with the one-byte body 01 (PERF-1's scheme, in felucca-bsp and ESTAMPIE).
+    /// Firmwares that know it answer with their whole identity, and some with their flash chip's JEDEC ID in bytes
+    /// 24-26. Never sent to M-VAVE's firmware or to an update loader.
+    static let fullHandshakeQuery: [UInt8] = [0xF0, 0x00, 0x32, 0x45, 0x08, 0x00, 0x00, 0x40, 0x00, 0x7E, 0x01, 0xF7]
     static let upgrade: [UInt8] = [0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7]
     /// The ROM bootloader key: after it, the FM-1 shows up as a USB disk "UBOOT1.00" and needs a computer to recover.
     static let bootloaderKey: [UInt8] = [0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7]
@@ -63,14 +91,37 @@ enum FM1Protocol {
         return portPattern.firstMatch(in: name, options: [], range: r) != nil
     }
 
-    static func parseIdentity(_ pkt: [UInt8]) -> FM1Identity? {
+    static func parseIdentity(_ pkt: [UInt8]) -> FM1Identity? { parseHello(pkt)?.identity }
+
+    /// The identity reply: 27 bytes, the text up to its first zero, then zeros, and in bytes 24-26 (high byte first) the
+    /// flash's JEDEC ID when the firmware sends it (0: not sent). Binary can follow the text, so it ends at its first
+    /// zero, as felucca-bsp tells hosts to read it.
+    static func parseHello(_ pkt: [UInt8]) -> FM1Hello? {
         guard pkt.count > 2, pkt.first == 0xF0, pkt.last == 0xF7 else { return nil }
         let d = SevenBit.unpack7(pkt[1..<(pkt.count - 1)])
         guard d.count == 34, d[0] == 0, d[1] == 0x59, d[2] == 0x11 else { return nil }
-        var chars = Array(d[6..<33])
-        while let last = chars.last, last == 0 { chars.removeLast() }
-        let txt = String(decoding: chars, as: UTF8.self)
-        return FM1Identity.parse(text: txt)
+        let body = Array(d[6..<33])
+        let end = body.firstIndex(of: 0) ?? body.count
+        guard let id = FM1Identity.parse(text: String(decoding: body[..<end], as: UTF8.self)) else { return nil }
+        // only where the text has ended before them can those bytes be the chip's
+        let jedec = end < 24 ? UInt32(body[24]) << 16 | UInt32(body[25]) << 8 | UInt32(body[26]) : 0
+        return FM1Hello(identity: id, flashID: jedec == 0 ? nil : jedec)
+    }
+
+    /// Is the full identity request worth sending to a device that answered the plain one with this? Not to M-VAVE's
+    /// firmware (FM-1_0xx), the USB rescue mode or an update loader: they don't know it, and the stock firmware is not
+    /// sent anything it doesn't know.
+    static func asksFullIdentity(after plain: FM1Identity) -> Bool {
+        !plain.isLoader && !FWSCPackage.isOfficialProduct(plain.text) && plain.text != "FM-1_000"
+    }
+
+    /// The device's answer: the full reply when it gave one that belongs to the plain one (the same text, or the whole
+    /// identity whose three-digit form the plain answer was), the plain reply otherwise. A chip ID in either counts.
+    static func merge(plain: FM1Hello, full: FM1Hello?) -> FM1Hello {
+        guard let full, full.identity.model == plain.identity.model,
+              full.identity.text == plain.identity.text || (plain.identity.isThreeDigits && FM1Identity.same(full.identity.text, plain.identity.text))
+        else { return plain }
+        return FM1Hello(identity: full.identity, flashID: full.flashID ?? plain.flashID)
     }
 
     static func parseRequest(_ pkt: [UInt8]) -> FM1ReadRequest? {

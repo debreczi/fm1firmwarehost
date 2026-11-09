@@ -28,6 +28,7 @@ struct JobSheet: View {
                         Image(systemName: j.success ? "checkmark.circle.fill" : "xmark.octagon.fill").font(.system(size: 48)).foregroundStyle(j.success ? Theme.ok : Theme.err)
                         Text(j.message).font(.system(size: 15)).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.9))
                         if !j.hint.isEmpty { Text(j.hint).font(.system(size: 13)).multilineTextAlignment(.center).foregroundStyle(Theme.textDim) }
+                        if let u = j.link { Link("Open the hub's rescue page", destination: u).font(.system(size: 14, weight: .semibold)) }
                     }
                     .padding(.vertical, 8)
                     Button("Done") { device.dismissJob() }.buttonStyle(PrimaryButtonStyle(tint: j.colour))

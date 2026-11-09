@@ -7,7 +7,7 @@ struct FirmwareListView: View {
     @Environment(LibraryStore.self) private var library
     @State private var query = ""
     @State private var showFilters = false
-    @State private var confirm: Firmware?
+    @State private var prompt: InstallPrompt?
     @State private var path: [Firmware] = []
 
     private var selected: Set<String> { Set(settings.selectedKinds) }
@@ -17,6 +17,7 @@ struct FirmwareListView: View {
         var list = catalog.firmwares.filter { f in
             if !settings.showBetas && f.beta && !f.isDevOnly { return false }
             if !settings.showDevOnly && f.isDevOnly { return false }
+            if settings.newerChipOnly && f.chipSupport != .new { return false }
             for g in Kinds.groups {
                 let ticked = g.kinds.map(\.key).filter { selected.contains($0) }
                 if !ticked.isEmpty && !ticked.contains(where: { f.allKinds.contains($0) }) { return false }
@@ -56,7 +57,7 @@ struct FirmwareListView: View {
                         }
                     } else {
                         ForEach(filtered) { f in
-                            FirmwareCard(firmware: f, installCount: library.installCount(firmwareId: f.id)) { confirm = f }
+                            FirmwareCard(firmware: f, installCount: library.installCount(firmwareId: f.id)) { ask(f) }
                         }
                     }
                     footer
@@ -85,25 +86,20 @@ struct FirmwareListView: View {
                         Toggle("Grid view", isOn: $settings.gridView)
                     } label: { Image(systemName: "arrow.up.arrow.down.circle") }
                     Button { showFilters = true } label: {
-                        Image(systemName: selected.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        Image(systemName: selected.isEmpty && !settings.newerChipOnly ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
             }
             .sheet(isPresented: $showFilters) {
                 FilterSheet().presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
-            .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible, presenting: confirm) { f in
-                Button("Install \(f.name) \(f.version)") { device.install(f) }
-                Button("Cancel", role: .cancel) {}
-            } message: { f in
-                Text(confirmMessage(f))
-            }
+            .installPrompt($prompt) { settings.newerChipOnly = true }
         }
     }
 
-    private var confirmTitle: String {
-        if let f = confirm { return "Put \(f.name) on your FM-1?" }
-        return ""
+    private func ask(_ f: Firmware) {
+        prompt = InstallPrompt(title: "Put \(f.name) on your FM-1?", message: confirmMessage(f), confirm: "Install \(f.name) \(f.version)",
+                               verdict: device.chipVerdict(f.chipSupport)) { consent in device.install(f, consent: consent) }
     }
 
     private func confirmMessage(_ f: Firmware) -> String {
@@ -133,6 +129,13 @@ struct FirmwareListView: View {
                     }
                 }
                 .padding(.vertical, 2)
+            }
+            if settings.newerChipOnly {
+                Button { settings.newerChipOnly = false } label: {
+                    Label("Only firmwares that work on newer FM-1s too", systemImage: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.ok)
             }
             HStack {
                 Text("\(filtered.count) of \(catalog.firmwares.count) firmwares")

@@ -85,9 +85,10 @@ struct PendingUpdate: Codable, Hashable {
     /// same identity and differ only by hash, so if the device already reported this identity beforehand — a
     /// re-install, or a rebuilt package of what is already on it — a later identity match says nothing about which
     /// build is running, and the exact record must stay. The same goes for not having known at all.
+    /// An identity's three-digit form counts as the identity (see `FM1Identity.same`).
     func isFinished(by id: FM1Identity) -> Bool {
         guard let before = identityBefore else { return false }
-        return !id.isLoader && id.text == product && before != product
+        return !id.isLoader && FM1Identity.same(id.text, product) && !FM1Identity.same(before, product)
     }
 }
 
@@ -115,8 +116,11 @@ struct Snapshot: Codable, Identifiable, Hashable {
     var packageNote: String? = nil      // why there is no package, while there is none
     var archiveFirmware: String? = nil  // what the firmware said when a SLOOP archive was made, "FELUCCA SLOOP 2.8.4"
     var ownInstaller: String? = nil     // the page that installs this package's firmware, when the package alone can't
+    var chip: String? = nil             // which flash chips the package works on (a ChipSupport), as known when it was stored
 
     var hasPackage: Bool { packageFile != nil }
+    /// Kept as text, so that a value a later version writes never makes the library unreadable here.
+    var chipSupport: ChipSupport? { chip.flatMap(ChipSupport.init(rawValue:)) }
     var hasArchive: Bool { archiveFile != nil }
     var hasSloopArchive: Bool { archiveFile == SloopArchive.fileName }
     /// Whether the app can write this backup's music back itself.
