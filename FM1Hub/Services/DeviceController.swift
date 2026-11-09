@@ -128,6 +128,7 @@ final class DeviceController {
         let u = FM1Updater(engine: engine)
         u.probeAll = settings.probeAllPorts
         u.chosenPorts = Set(settings.chosenPorts)
+        u.plainOnly = Set(catalog.firmwares.filter(\.usesStockLoader).map(\.product))
         u.log = { [weak self] s in Task { @MainActor in self?.append(s) } }
         updater = u
         return u
@@ -167,6 +168,7 @@ final class DeviceController {
         if !isBusy, let p = reportPort, !midiPorts.contains(p) {
             flashReport = nil
             reportPort = nil
+            unsafeChip = nil         // the next FM-1 may be another one, other MIDI gear still plugged in or not
         }
         if midiPorts.isEmpty, !isBusy {
             identity = nil
@@ -211,7 +213,7 @@ final class DeviceController {
                 otherPorts = []
                 statusMessage = ""
                 append("identity \(dev.identity.text) on \(dev.portName)")
-                noteFlash(dev.flashID, port: dev.portName)
+                if !dev.identity.isLoader { noteFlash(dev.flashID, port: dev.portName) }   // a loader never says
                 musicBackupSupported = nil
                 reportedName = nil
                 reconcilePending(dev.identity)
@@ -268,13 +270,11 @@ final class DeviceController {
     }
 
     /// Which flash chips a package works on: the catalogue's word for this very package (by SHA-256), M-VAVE's own
-    /// firmware, what a backup remembered of it, or unknown. An official-looking identity counts as M-VAVE's only when
-    /// no firmware of the catalogue reports it.
+    /// firmware (by its hash: the V15 or a file fetched from M-VAVE), what a backup or attempt remembered, or unknown.
     func chipSupport(sha256: String, product: String, remembered: ChipSupport? = nil) -> ChipSupport {
         if let f = catalog.firmwares.first(where: { $0.sha256 == sha256 }) { return f.chipSupport }
-        if sha256 == FWSCPackage.stockV15SHA256 { return .official }
+        if packages.isFetchedOfficial(sha256) { return .official }
         if let r = remembered, r != .unknown { return r }
-        if FWSCPackage.isOfficialProduct(product), !catalog.firmwares.isEmpty, catalog.firmwares(reporting: product).isEmpty { return .official }
         return .unknown
     }
 
@@ -282,9 +282,8 @@ final class DeviceController {
         chipSupport(sha256: s.packageSHA256 ?? "", product: s.product ?? s.identity, remembered: s.chipSupport)
     }
 
-    /// M-VAVE's own when it was installed as that (`.stock`), the catalogue's word otherwise.
     func chipSupport(of p: PendingUpdate) -> ChipSupport {
-        p.source == .stock ? .official : chipSupport(sha256: p.sha256, product: p.product)
+        chipSupport(sha256: p.sha256, product: p.product, remembered: p.chip.flatMap(ChipSupport.init(rawValue:)))
     }
 
     /// What the flash chip check says now about installing a package with this support.
@@ -359,7 +358,7 @@ final class DeviceController {
             j.title = "Official firmware \(pkg.officialVersion ?? pkg.product)"
             let after = try await flash(pkg, product: pkg.product, stockLoader: true,
                                         name: "Official firmware", version: pkg.officialVersion ?? "", firmwareId: nil, source: .stock,
-                                        support: .official, consent: consent)
+                                        support: chipSupport(sha256: pkg.sha256, product: pkg.product), consent: consent)
             library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: pkg.officialVersion ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .stock, success: true))
             j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
@@ -425,8 +424,7 @@ final class DeviceController {
             // record was made without knowing what the device was running, a later Connect can still settle it.
             let outcome = try await up.resume(image: pkg.logicalImage, expectedProduct: pending.product, stockLoader: pending.usesStockLoader,
                                               beforeWriting: { [self] found in
-                                                  noteFlash(found.flashID, port: found.portName)
-                                                  let now = chipVerdict(chipSupport(of: pending))
+                                                  let now = chipVerdict(chipSupport(of: pending))   // a loader never reports the chip
                                                   guard ChipGuard.allows(now, consent: consent) else {
                                                       append("flash chip check: \(flashChip?.summary ?? "not reported"), resume: nothing written")
                                                       throw FM1Error.chipCheck(ChipGuard.stopText(now))
@@ -445,6 +443,7 @@ final class DeviceController {
                 throw FM1Error.stopped("The loader stopped before the end. Replug and try again.")
             }
             forgetPending()
+            if let b = up.cameBack { noteFlash(b.flashID, port: b.port) }
             identity = FM1Identity.parse(text: after)
             identityDate = Date()
             loaderWaiting = nil
@@ -494,7 +493,7 @@ final class DeviceController {
         var stuckSuspect = false
         let record: FM1Updater.BeforeWriting = { [self] dev in
             let found = dev.identity
-            noteFlash(dev.flashID, port: dev.portName)
+            if !found.isLoader { noteFlash(dev.flashID, port: dev.portName) }   // a loader never says: what is known stands
             let now = chipVerdict(support)
             guard ChipGuard.allows(now, consent: consent) else {
                 append("flash chip check: \(flashChip?.summary ?? "not reported"), package \(support.rawValue): nothing written")
@@ -507,7 +506,7 @@ final class DeviceController {
             musicWritesBack = true
             token = try library.beginAttempt(PendingUpdate(product: pkg.product, sha256: pkg.sha256, firmwareId: firmwareId,
                                                            name: name, version: version, usesStockLoader: stockLoader,
-                                                           source: source, identityBefore: found.text))
+                                                           source: source, identityBefore: found.text, chip: support.rawValue))
         }
         let after: String
         do {
@@ -541,6 +540,7 @@ final class DeviceController {
             throw error
         }
         forgetPending()
+        if let b = up.cameBack { noteFlash(b.flashID, port: b.port) }
         identity = FM1Identity.parse(text: after)
         identityDate = Date()
         loaderWaiting = nil

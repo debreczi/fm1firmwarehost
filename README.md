@@ -138,15 +138,17 @@ download mode. The app checks these chips, by the JEDEC ID each one answers with
 
 **How the app learns the chip.** Only from the running firmware. After the plain identity request (cmd `0x11`, no
 body) the app sends the full one (cmd `0x11` with the one-byte body `01`, PERF-1's scheme in felucca-bsp and ESTAMPIE)
-to every firmware except M-VAVE's own (`FM-1_0xx`), the USB rescue mode and update loaders. A firmware that knows it
+to every firmware except M-VAVE's own (`FM-1_0xx`) and those built on its code (`loader: mvave`), the USB rescue
+mode and update loaders. A firmware that knows it
 answers with its whole identity and may put the chip's ID in bytes 24–26 of the 27-byte reply, high byte first (0: not
 read). The reply's text ends at its first zero. M-VAVE's firmware never reports the chip, so most of the time it is
 "not reported" and a newer FM-1 can't be told from a first one.
 
 **Which firmwares work on it.** The hub's catalogue has a `chip` field for each firmware, which the hub reads from the
 package: `new` (every FM-1, the newer chip too), `old` (the first FM-1s only) or `any` (does not check the chip). It
-describes the catalogue's package, by SHA-256. M-VAVE's own firmware works on both. Anything else, such as an older
-version, a file or a backup the catalogue doesn't list, is unknown.
+describes the catalogue's package, by SHA-256. M-VAVE's own firmware works on both: the V15 the hub keeps and the files
+the app fetched from M-VAVE's server, by SHA-256 (an official-looking identity alone can be a custom firmware's).
+Anything else, such as an older version, a file or a backup the catalogue doesn't list, is unknown.
 
 **What the app does** (`ChipGuard.verdict`, tested cell by cell in `FlashChipTests`):
 

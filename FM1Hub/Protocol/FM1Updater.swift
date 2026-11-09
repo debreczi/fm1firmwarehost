@@ -60,6 +60,10 @@ final class FM1Updater {
     var chosenPorts: Set<String> = []
     /// Probe every MIDI port, not only the names the hub knows.
     var probeAll = false
+    /// Identities of firmwares built on M-VAVE's own code: they are sent only the plain identity request, as M-VAVE's are.
+    var plainOnly: Set<String> = []
+    /// The port and flash chip report of the device that came back after an install or a resume.
+    private(set) var cameBack: (port: String, flashID: UInt32?)?
     var log: (String) -> Void = { _ in }
     private var cancelled = false
 
@@ -92,7 +96,7 @@ final class FM1Updater {
             }
         }
         guard let plain else { return nil }
-        guard askFull, FM1Protocol.asksFullIdentity(after: plain.identity) else { return plain }
+        guard askFull, !plainOnly.contains(plain.identity.text), FM1Protocol.asksFullIdentity(after: plain.identity) else { return plain }
         link.drain()   // an answer to a repeated plain request is not the full one
         guard link.send(FM1Protocol.fullHandshakeQuery) else { return plain }
         let end = Date().addingTimeInterval(0.5)
@@ -246,6 +250,7 @@ final class FM1Updater {
             throw FM1Error.noReturn("The device did not come back: power-cycle it.")
         }
         back.link.close()
+        cameBack = (back.portName, back.flashID)
         if !FM1Identity.same(back.identity.text, product) {
             throw FM1Error.mismatch("Installed, but the device reports \(back.identity.text).")
         }
@@ -308,6 +313,7 @@ final class FM1Updater {
             throw FM1Error.noReturn("The FM-1 did not come back after the write: power-cycle it.")
         }
         back.link.close()
+        cameBack = (back.portName, back.flashID)
         if !FM1Identity.same(back.identity.text, expectedProduct) {
             throw FM1Error.mismatch("Written, but the FM-1 reports \(back.identity.text).")
         }

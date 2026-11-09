@@ -24,7 +24,7 @@ struct FlashChipsView: View {
             } header: { Text("How the app learns the chip") }
 
             Section {
-                Text("The FM-1 Firmware Hub reads from each package which chips it works on and lists it in its catalogue: every FM-1 with the newer chip too, the first FM-1s only, or a firmware that doesn't check the chip. M-VAVE's own firmware works on both. A package the catalogue doesn't list, such as an older version, a file or some backups, is unknown.")
+                Text("The FM-1 Firmware Hub reads from each package which chips it works on and lists it in its catalogue: every FM-1 with the newer chip too, the first FM-1s only, or a firmware that doesn't check the chip. M-VAVE's own firmware works on both: the V15 the hub keeps, and what the app fetched from M-VAVE's server. A package the catalogue doesn't list, such as an older version, a file or some backups, is unknown.")
             } header: { Text("Which firmwares work on it") }
 
             Section {

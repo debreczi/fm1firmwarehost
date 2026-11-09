@@ -28,7 +28,8 @@ struct DeviceView: View {
             .hubBackground()
             .navigationTitle("Your FM-1")
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .item], allowsMultipleSelection: false) { result in
-                if case .success(let urls) = result, let u = urls.first { askFile(u) }
+                // a moment after the picker has gone, so that what this shows next can be shown
+                if case .success(let urls) = result, let u = urls.first { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { askFile(u) } }
             }
             .installPrompt($prompt) { settings.newerChipOnly = true; settings.tab = 0 }
             .task { await device.checkOfficial() }
@@ -105,7 +106,7 @@ struct DeviceView: View {
             }
             if let chip = device.flashChip, device.isConnected {
                 Label("Flash chip: \(chip.summary)", systemImage: "memorychip")
-                    .font(.system(size: 12)).foregroundStyle(chip == .notReported ? Theme.textDim : Theme.ok)
+                    .font(.system(size: 12)).foregroundStyle(chip == .notReported ? Theme.textDim : chip == .reported(FlashChip.first) ? Theme.ok : Theme.warn)
             }
             if let s = device.musicBackupSupported, device.isConnected {
                 Label(s ? (device.musicWritesBack ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "Backup saves this firmware's music too, but the app can't put it back. Its own web editor may open the file.") : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",

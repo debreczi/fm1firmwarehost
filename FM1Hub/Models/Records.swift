@@ -76,6 +76,8 @@ struct PendingUpdate: Codable, Hashable {
     /// What the device reported just before the attempt, when the app knew. Reconciling a finished update later
     /// depends on it: see `isFinished(by:)`.
     var identityBefore: String?
+    /// Which flash chips the package works on (a ChipSupport), as known when the attempt began, for Resume.
+    var chip: String? = nil
 
     /// True when a device reporting this identity has already finished what this record was for, even if this app
     /// was not watching when it happened. Three things have to hold: the device is running the identity the record

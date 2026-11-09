@@ -57,14 +57,33 @@ final class PackageStore {
         let p = try FWSCPackage(data: data)
         guard p.isOfficial else { throw FM1Error.package("M-VAVE's file is not an official FM-1 firmware (it reports \(p.product)).") }
         try? keep(p)
+        noteOfficial(p.sha256)
         return p
     }
 
+    private static let officialKey = "officialSHA256s"
+
+    /// Is this package one the app fetched from M-VAVE's download server (or the official V15)? Only those count as
+    /// M-VAVE's own: an official-looking number alone can be a custom firmware's (SPAMPY is FM-1_036).
+    func isFetchedOfficial(_ sha256: String) -> Bool {
+        sha256 == FWSCPackage.stockV15SHA256 || (UserDefaults.standard.stringArray(forKey: Self.officialKey) ?? []).contains(sha256)
+    }
+
+    private func noteOfficial(_ sha256: String) {
+        var all = UserDefaults.standard.stringArray(forKey: Self.officialKey) ?? []
+        guard !all.contains(sha256) else { return }
+        all.append(sha256)
+        UserDefaults.standard.set(all, forKey: Self.officialKey)
+    }
+
+    /// The newest official package on the phone: one fetched from M-VAVE, never another file that only looks official
+    /// (every package installed is kept here, files and custom firmwares too).
     func newestCachedOfficial() -> FWSCPackage? {
         var best: FWSCPackage?
         for u in cachedFiles() where u.lastPathComponent.hasPrefix("FM-1_0") {
             // below V15 such a number can be a custom firmware's: Bubba is FM-1_003
-            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial, p.product >= FWSCPackage.stockV15Product {
+            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial, p.product >= FWSCPackage.stockV15Product,
+               isFetchedOfficial(p.sha256) {
                 if best == nil || p.product > best!.product { best = p }
             }
         }
