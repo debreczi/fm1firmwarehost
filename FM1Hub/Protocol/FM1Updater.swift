@@ -117,7 +117,7 @@ final class FM1Updater {
             guard let link = engine.open(source: src.endpoint, destination: dest, name: src.name) else { continue }
             if let h = await handshake(link, tries: 2, askFull: askFull), filter(h.identity) {
                 log("found \(h.identity.text) on \(src.name)" + (h.flashID.map { ", flash \(FlashChip.hex($0))" } ?? ""))
-                return FM1Device(link: link, identity: h.identity, portName: src.name, flashID: h.flashID)
+                return FM1Device(link: link, identity: h.identity, portName: src.name, flashID: h.identity.isLoader ? nil : h.flashID)   // a loader never reports it
             }
             link.close()
             await sleep(ms: 100)

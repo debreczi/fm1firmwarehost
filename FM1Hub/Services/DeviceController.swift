@@ -177,7 +177,7 @@ final class DeviceController {
             musicBackupSupported = nil
             reportedName = nil
             loaderWaiting = nil          // unplugged: the Resume card must not keep claiming a loader is waiting
-            unsafeChip = nil             // and the next FM-1 may have another chip
+            if library.pending == nil { unsafeChip = nil }   // the next FM-1 may have another chip; an unfinished update's stays
             statusMessage = "No MIDI device."
         }
     }
