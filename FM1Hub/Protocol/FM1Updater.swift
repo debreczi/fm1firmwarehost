@@ -86,16 +86,16 @@ final class FM1Updater {
     /// an update loader doesn't ask: a loader never knows it, and what a firmware it passes over answered is lost anyway.
     func handshake(_ link: MIDILink, tries: Int = 3, askFull: Bool = true) async -> FM1Hello? {
         link.drain()
-        var plain: FM1Hello?
+        var reply: FM1Hello?
         tryLoop: for _ in 0..<tries {
             guard link.send(FM1Protocol.handshakeQuery) else { return nil }
             let end = Date().addingTimeInterval(1.0)
             while Date() < end {
                 guard let p = await link.read(timeout: end.timeIntervalSinceNow) else { break }
-                if let h = FM1Protocol.parseHello(p) { plain = h; break tryLoop }
+                if let h = FM1Protocol.parseHello(p) { reply = h; break tryLoop }
             }
         }
-        guard let plain else { return nil }
+        guard let plain = reply else { return nil }
         guard askFull, !plainOnly.contains(plain.identity.text), FM1Protocol.asksFullIdentity(after: plain.identity) else { return plain }
         link.drain()   // an answer to a repeated plain request is not the full one
         guard link.send(FM1Protocol.fullHandshakeQuery) else { return plain }

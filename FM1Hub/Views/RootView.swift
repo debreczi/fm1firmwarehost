@@ -25,7 +25,7 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(4)
         }
-        .fullScreenCover(isPresented: Binding(get: { !settings.disclaimerAccepted }, set: { _ in })) {
+        .fullScreenCover(isPresented: Binding(get: { !self.settings.disclaimerAccepted }, set: { _ in })) {
             DisclaimerView()
         }
         .sheet(isPresented: $device.showJobSheet) {
