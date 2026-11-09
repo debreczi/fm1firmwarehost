@@ -168,7 +168,9 @@ final class DeviceController {
         if !isBusy, let p = reportPort, !midiPorts.contains(p) {
             flashReport = nil
             reportPort = nil
-            unsafeChip = nil         // the next FM-1 may be another one, other MIDI gear still plugged in or not
+            // the next FM-1 may be another one, other MIDI gear still plugged in or not; but while an update is
+            // unfinished this one is the unit it was for, wherever its port went
+            if library.pending == nil { unsafeChip = nil }
         }
         if midiPorts.isEmpty, !isBusy {
             identity = nil
@@ -213,7 +215,7 @@ final class DeviceController {
                 otherPorts = []
                 statusMessage = ""
                 append("identity \(dev.identity.text) on \(dev.portName)")
-                if !dev.identity.isLoader { noteFlash(dev.flashID, port: dev.portName) }   // a loader never says
+                noteFlash(dev.flashID, port: dev.portName)
                 musicBackupSupported = nil
                 reportedName = nil
                 reconcilePending(dev.identity)
@@ -223,9 +225,8 @@ final class DeviceController {
                 musicBackupSupported = nil
                 reportedName = nil
                 loaderWaiting = nil          // nothing answered: there is no loader to show a Resume card for
-                flashReport = nil
+                flashReport = nil            // a newer chip stays known: an FM-1 still plugged in may just be busy
                 reportPort = nil
-                unsafeChip = nil
                 otherPorts = up.others()
                 statusMessage = "No FM-1 found" + up.seen() + ". Plug it in by USB, close other MIDI apps, try again."
                 append("no FM-1" + up.seen())
@@ -261,7 +262,7 @@ final class DeviceController {
     // MARK: Flash chips
 
     /// What a device found just now said of its chip. A newer or unknown chip is also remembered (`unsafeChip`); the
-    /// first FM-1s' chip, reported now, puts that away.
+    /// first FM-1s' chip, reported now, puts that away. A device that says nothing, a loader too, leaves only that.
     private func noteFlash(_ id: UInt32?, port: String) {
         if let id, flashChip != .reported(id) { append("flash chip \(FlashChip.hex(id))") }
         flashReport = DeviceFlash(id)
@@ -420,11 +421,13 @@ final class DeviceController {
             let pkg = try await pendingPackage(pending, firmware: f)
             if Task.isCancelled { throw FM1Error.cancelled }   // the updater made here knows nothing of an earlier Cancel
             let up = makeUpdater()
+            defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port) } }   // whatever the outcome
             // The record already exists; this writes back the loader identity this attempt found, so that if the
             // record was made without knowing what the device was running, a later Connect can still settle it.
             let outcome = try await up.resume(image: pkg.logicalImage, expectedProduct: pending.product, stockLoader: pending.usesStockLoader,
                                               beforeWriting: { [self] found in
-                                                  let now = chipVerdict(chipSupport(of: pending))   // a loader never reports the chip
+                                                  noteFlash(found.flashID, port: found.portName)
+                                                  let now = chipVerdict(chipSupport(of: pending))
                                                   guard ChipGuard.allows(now, consent: consent) else {
                                                       append("flash chip check: \(flashChip?.summary ?? "not reported"), resume: nothing written")
                                                       throw FM1Error.chipCheck(ChipGuard.stopText(now))
@@ -443,7 +446,6 @@ final class DeviceController {
                 throw FM1Error.stopped("The loader stopped before the end. Replug and try again.")
             }
             forgetPending()
-            if let b = up.cameBack { noteFlash(b.flashID, port: b.port) }
             identity = FM1Identity.parse(text: after)
             identityDate = Date()
             loaderWaiting = nil
@@ -481,6 +483,7 @@ final class DeviceController {
         // while the loader is asked for below, is only remembered by the task.
         if Task.isCancelled { throw FM1Error.cancelled }
         let up = makeUpdater()
+        defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port) } }   // whatever the outcome
         let image = pkg.logicalImage
         try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
         // The record is written by this hook, which the updater calls once it has found the device and checked its
@@ -493,7 +496,7 @@ final class DeviceController {
         var stuckSuspect = false
         let record: FM1Updater.BeforeWriting = { [self] dev in
             let found = dev.identity
-            if !found.isLoader { noteFlash(dev.flashID, port: dev.portName) }   // a loader never says: what is known stands
+            noteFlash(dev.flashID, port: dev.portName)
             let now = chipVerdict(support)
             guard ChipGuard.allows(now, consent: consent) else {
                 append("flash chip check: \(flashChip?.summary ?? "not reported"), package \(support.rawValue): nothing written")
@@ -540,7 +543,6 @@ final class DeviceController {
             throw error
         }
         forgetPending()
-        if let b = up.cameBack { noteFlash(b.flashID, port: b.port) }
         identity = FM1Identity.parse(text: after)
         identityDate = Date()
         loaderWaiting = nil
