@@ -95,8 +95,11 @@ final class DeviceController {
     /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
     private(set) var officialLatest: String?
     private(set) var officialChecking = false
-    /// When m-vave.com last answered, and when the app last asked it.
-    private var officialCheckedAt: Date?
+    /// When m-vave.com last answered, kept across launches (its file is kept too), and when the app last asked it.
+    private var officialCheckedAt: Date? {
+        get { UserDefaults.standard.object(forKey: "officialCheckedAt") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "officialCheckedAt") }
+    }
     private var officialTriedAt: Date?
     private var officialTask: Task<Void, Never>?
     var statusMessage: String = ""
@@ -192,14 +195,15 @@ final class DeviceController {
     }
 
     /// Asks m-vave.com which official version is current, in a task of its own that no screen cancels when it goes
-    /// away, so the tabs share one download. Without `force` it asks only when the last answer is some hours old, or a
-    /// minute after a try that failed; pull to refresh forces it.
+    /// away, so the tabs share one download. Without `force` it asks only when the last answer is some hours old, or ten
+    /// minutes after a try that failed (offline, or a file the app didn't accept); pull to refresh forces it. Never
+    /// while the FM-1 is busy.
     func refreshOfficial(force: Bool = false) {
-        guard officialTask == nil, !Demo.isOn else { return }
+        guard officialTask == nil, !isBusy, !Demo.isOn else { return }
         let now = Date()
         if !force {
-            if let t = officialCheckedAt, now.timeIntervalSince(t) < 6 * 3600 { return }
-            if let t = officialTriedAt, now.timeIntervalSince(t) < 60 { return }
+            if officialLatest != nil, let t = officialCheckedAt, now.timeIntervalSince(t) < 6 * 3600 { return }
+            if let t = officialTriedAt, now.timeIntervalSince(t) < 600 { return }
         }
         officialTriedAt = now
         officialTask = Task { [weak self] in
@@ -360,18 +364,21 @@ final class DeviceController {
         let title = latest ? "Official firmware" : "Official firmware V15"
         var j = DeviceJob(kind: .official, title: title, subtitle: latest ? "M-VAVE's current release" : "M-VAVE's recovery image, from the hub", colour: Color(hex: "#9aa4b2"), imageURL: nil)
         var product = latest ? (officialLatest ?? "") : FWSCPackage.stockV15Product
+        let shown = officialLatest       // the version the screen named when the user said yes
         start(job: j) { [self] in
             let before = identity?.text
             try await autoSnapshotIfWanted()
             phase = .downloading(0)
             let pkg: FWSCPackage
+            var fromPhone = false
             if latest {
                 do {
                     pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
                 } catch {
                     guard let cached = try? await packages.officialLatest(cachedOnly: true) else { throw error }
-                    append("m-vave.com unreachable, using the cached \(cached.product)")
+                    append("m-vave.com's file couldn't be fetched (\(error.localizedDescription)), using the cached \(cached.product)")
                     pkg = cached
+                    fromPhone = true
                 }
                 officialLatest = pkg.product
             } else {
@@ -385,6 +392,11 @@ final class DeviceController {
             library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: pkg.officialVersion ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .stock, success: true))
             j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
+            if fromPhone {
+                j.message += " m-vave.com's file couldn't be fetched, so the copy on this phone was used."
+            } else if latest, let s = shown, s != pkg.product, let v = FWSCPackage.officialVersion(of: s) {
+                j.message += " The app had shown \(v): M-VAVE's file has changed since."
+            }
             return j
         } onFailure: { [self] e in
             library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: FWSCPackage.officialVersion(of: product) ?? "", product: product, sha256: nil,

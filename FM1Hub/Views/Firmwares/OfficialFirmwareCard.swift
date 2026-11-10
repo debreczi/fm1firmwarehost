@@ -10,7 +10,7 @@ enum OfficialFirmware {
             .replacingOccurrences(of: "'", with: "")
         let words = plain.split(separator: " ").map(String.init)
         let current = latest.map { "\($0) \(FWSCPackage.officialVersion(of: $0) ?? "")" } ?? ""
-        let text = "official firmware m-vave mvave fm1 stock original factory recovery latest current update fm-1_015 v15 \(current)".lowercased()
+        let text = "official firmware m-vave mvave fm1 stock original factory recovery image back known-good latest current update fm-1_015 v15 \(current)".lowercased()
         return words.allSatisfy { text.contains($0) }
     }
 }
