@@ -121,8 +121,8 @@ final class DeviceController {
             Task { @MainActor in self?.setupChanged() }
         }
         refreshPorts()
-        // only a file m-vave.com once answered with: the hub's V15 is not M-VAVE's latest
-        officialLatest = packages.newestCachedOfficial().flatMap { $0.isStockV15 ? nil : $0.product }
+        // m-vave.com's last answer, else the newest file it once answered with: the hub's V15 is not M-VAVE's latest
+        officialLatest = officialCheckedProduct ?? packages.newestCachedOfficial().flatMap { $0.isStockV15 ? nil : $0.product }
     }
 
     var whoIs: WhoIs? { catalog.whoIs(identity?.text, named: reportedName) }
@@ -224,11 +224,18 @@ final class DeviceController {
         officialChecking = true
         defer { officialChecking = false }
         if let p = try? await packages.officialLatest() {
-            officialLatest = p.product
-            officialCheckedAt = Date()
-            officialCheckedProduct = p.product
+            noteOfficialAnswer(p)
             append("official firmware on m-vave.com: \(p.product)")
         }
+    }
+
+    /// m-vave.com answered with this file, whoever asked: it is the version shown as M-VAVE's latest, and the time
+    /// before the next check counts from now.
+    private func noteOfficialAnswer(_ p: FWSCPackage) {
+        officialLatest = p.product
+        officialCheckedAt = Date()
+        officialCheckedProduct = p.product
+        officialTriedAt = nil
     }
 
     // MARK: Connect
@@ -382,16 +389,14 @@ final class DeviceController {
                 do {
                     pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
                 } catch {
-                    guard let cached = try? await packages.officialLatest(cachedOnly: true) else { throw error }
+                    // the hub's V15 is not M-VAVE's latest: "Back to V15" is the way to that one
+                    guard let cached = try? await packages.officialLatest(cachedOnly: true), !cached.isStockV15 else { throw error }
                     append("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), using the cached \(cached.product)")
                     pkg = cached
                     fromPhone = true
+                    j.subtitle = "M-VAVE's release, the copy on this phone"
                 }
-                if !fromPhone {           // m-vave.com answered: the phone's copy says nothing of what it publishes
-                    officialLatest = pkg.product
-                    officialCheckedAt = Date()
-                    officialCheckedProduct = pkg.product
-                }
+                if !fromPhone { noteOfficialAnswer(pkg) }   // the phone's copy says nothing of what M-VAVE publishes
             } else {
                 pkg = try await packages.stockPackage(catalog.stock) { p in Task { @MainActor in self.phase = .downloading(p) } }
             }
@@ -876,7 +881,10 @@ final class DeviceController {
         if FWSCPackage.isOfficialProduct(identity) {
             if identity == FWSCPackage.stockV15Product, let p = try? await packages.stockPackage(catalog.stock) { return (p, "hub (V15)") }
             phase = .searching("Asking M-VAVE's server…")
-            if let p = try? await packages.officialLatest(), p.product == identity { return (p, "m-vave.com") }
+            if let p = try? await packages.officialLatest() {
+                noteOfficialAnswer(p)
+                if p.product == identity { return (p, "m-vave.com") }
+            }
         }
         let candidates = who?.firmware.map { [$0] } ?? catalog.familyCandidates(for: identity)
         if !candidates.isEmpty {
