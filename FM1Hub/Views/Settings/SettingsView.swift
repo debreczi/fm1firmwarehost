@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(LibraryStore.self) private var library
     @Environment(CatalogStore.self) private var catalog
+    @Environment(DeviceController.self) private var device
     @State private var cacheSize: Int64 = 0
     @State private var confirmClear = false
 
@@ -70,7 +71,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear { cacheSize = PackageStore.shared.cacheSize() }
             .confirmationDialog("Delete the downloaded packages?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { PackageStore.shared.clearCache(); cacheSize = PackageStore.shared.cacheSize() }
+                Button("Delete", role: .destructive) { PackageStore.shared.clearCache(); device.forgetOfficialAnswer(); cacheSize = PackageStore.shared.cacheSize() }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Packages inside backups are kept. A firmware that is only in the cache can no longer be restored without the network.") }
         }

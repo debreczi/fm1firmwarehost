@@ -121,8 +121,7 @@ final class DeviceController {
             Task { @MainActor in self?.setupChanged() }
         }
         refreshPorts()
-        // m-vave.com's last answer, else the newest file it once answered with: the hub's V15 is not M-VAVE's latest
-        officialLatest = officialCheckedProduct ?? packages.newestCachedOfficial().flatMap { $0.isStockV15 ? nil : $0.product }
+        officialLatest = keptOfficial()
     }
 
     var whoIs: WhoIs? { catalog.whoIs(identity?.text, named: reportedName) }
@@ -227,6 +226,18 @@ final class DeviceController {
             noteOfficialAnswer(p)
             append("official firmware on m-vave.com: \(p.product)")
         }
+    }
+
+    /// What the app shows as M-VAVE's latest before asking: m-vave.com's last answer, else the newest file it once
+    /// answered with that is on the phone. The hub's V15 is not M-VAVE's latest.
+    private func keptOfficial() -> String? {
+        officialCheckedProduct ?? packages.newestCachedOfficial().flatMap { $0.isStockV15 ? nil : $0.product }
+    }
+
+    /// The phone's packages were deleted: m-vave.com's last answer goes with them (the package store forgets it too).
+    func forgetOfficialAnswer() {
+        officialLatest = keptOfficial()
+        officialTriedAt = nil
     }
 
     /// m-vave.com answered with this file, whoever asked: it is the version shown as M-VAVE's latest, and the time
@@ -390,11 +401,14 @@ final class DeviceController {
                     pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
                 } catch {
                     // the hub's V15 is not M-VAVE's latest: "Back to V15" is the way to that one
-                    guard let cached = try? await packages.officialLatest(cachedOnly: true), !cached.isStockV15 else { throw error }
+                    guard let cached = try? await packages.officialLatest(cachedOnly: true), !cached.isStockV15 else {
+                        throw FM1Error.package("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), and no copy of it is on this phone. Try again online, or use Back to V15 for the recovery image.")
+                    }
                     append("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), using the cached \(cached.product)")
                     pkg = cached
                     fromPhone = true
                     j.subtitle = "M-VAVE's release, the copy on this phone"
+                    job?.subtitle = j.subtitle            // the sheet shows it now, whatever comes next
                 }
                 if !fromPhone { noteOfficialAnswer(pkg) }   // the phone's copy says nothing of what M-VAVE publishes
             } else {
@@ -410,6 +424,7 @@ final class DeviceController {
             j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
             if fromPhone {
                 j.message += " m-vave.com's file couldn't be fetched or wasn't accepted, so the copy on this phone was used."
+                if let s = shown, s != pkg.product, let v = FWSCPackage.officialVersion(of: s) { j.message += " The app had shown \(v)." }
             } else if latest, let s = shown, s != pkg.product, let v = FWSCPackage.officialVersion(of: s) {
                 j.message += " The app had shown \(v): M-VAVE's file has changed since."
             }

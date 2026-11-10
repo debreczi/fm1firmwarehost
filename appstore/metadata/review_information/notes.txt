@@ -26,7 +26,7 @@ REGIONAL DIFFERENCES
 None. The app is in English and works the same in every region.
 
 THIRD-PARTY MATERIAL
-- The app contains no firmware. Each firmware is its author's own open-source work under its own licence, shown in the app, and is downloaded only when the user installs or backs it up. M-VAVE's current firmware comes from M-VAVE's own public download server, and its V15 recovery image from the hub: the app fetches M-VAVE's file to show which version is current (when it starts or comes back, if its last answer is some hours old or a try failed ten minutes or more before), and keeps it for installing offline.
+- The app contains no firmware. Each firmware is its author's own open-source work under its own licence, shown in the app, and is downloaded only when the user installs or backs it up. M-VAVE's current firmware comes from M-VAVE's own public download server, and its V15 recovery image from the hub: the app fetches M-VAVE's file to show which version is current (when it starts, comes back or opens a tab that shows it: at most every 6 hours after an answer and 10 minutes after a failed try, and at once on pull to refresh), and keeps it for installing offline.
 - The update and backup protocol code is a port of GPL-3.0 code by Leo Kuroshita (Hügelton Instruments). He was asked before App Store distribution and has no objection as long as the app stays open source under the GPL-3.0. The app is GPL-3.0 and its full source is public: https://github.com/debreczi/fm1firmwarehost (see NOTICE.md). His written answer is available on request.
 - The app is not made by, endorsed by or associated with M-VAVE or The FM-1 Firmware Hub. "M-VAVE" and "FM-1" only name the hardware it works with.
 - The app has no regulated content.
