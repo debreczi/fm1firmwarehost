@@ -32,7 +32,7 @@ struct DeviceView: View {
                 if case .success(let urls) = result, let u = urls.first { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { askFile(u) } }
             }
             .installPrompt($prompt) { settings.newerChipOnly = true; settings.tab = 0 }
-            .task { await device.checkOfficial() }
+            .onAppear { device.checkOfficialOnce() }
             .alert("Name this backup", isPresented: $askName) {
                 TextField("Name", text: $snapshotName)
                 Button("Save") { device.snapshot(name: snapshotName.isEmpty ? nil : snapshotName) }

@@ -2,10 +2,12 @@ import SwiftUI
 
 /// What finds M-VAVE's own firmware on the Firmwares tab.
 enum OfficialFirmware {
-    /// Does a search find it? Every word must be in what people call it: an empty search does.
-    static func matches(_ query: String, latestVersion: String?) -> Bool {
+    /// Does a search find it? Every word must be in what people call it, its identities and versions included (`latest`
+    /// is the current release's identity, "FM-1_016"): an empty search does.
+    static func matches(_ query: String, latest: String?) -> Bool {
         let words = query.lowercased().split(separator: " ").map(String.init)
-        let text = "official m-vave mvave stock original factory recovery v15 \(latestVersion?.lowercased() ?? "")"
+        let current = latest.map { "\($0) \(FWSCPackage.officialVersion(of: $0) ?? "")" } ?? ""
+        let text = "official firmware m-vave mvave stock original factory recovery fm-1_015 v15 \(current)".lowercased()
         return words.allSatisfy { text.contains($0) }
     }
 }

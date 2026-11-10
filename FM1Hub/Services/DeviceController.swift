@@ -97,6 +97,7 @@ final class DeviceController {
     private(set) var officialChecking = false
     /// m-vave.com answered at least once since the app started.
     private(set) var officialChecked = false
+    private var officialTask: Task<Void, Never>?
     var statusMessage: String = ""
     var showJobSheet = false
 
@@ -187,6 +188,16 @@ final class DeviceController {
     func choosePort(_ name: String) {
         if !settings.chosenPorts.contains(name) { settings.chosenPorts.append(name) }
         otherPorts.removeAll { $0 == name }
+    }
+
+    /// Asks m-vave.com once per launch, in a task of its own that no screen cancels when it goes away, so the Firmwares
+    /// and FM-1 tabs share one download. A check that failed runs again the next time a screen asks.
+    func checkOfficialOnce() {
+        guard !officialChecked, officialTask == nil, !Demo.isOn else { return }
+        officialTask = Task { [weak self] in
+            await self?.checkOfficial()
+            self?.officialTask = nil
+        }
     }
 
     /// Asks M-VAVE's server which official version is current (and keeps the file). Quiet when offline.
