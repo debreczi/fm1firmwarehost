@@ -4,6 +4,7 @@ struct RootView: View {
     @Environment(DeviceController.self) private var device
     @Environment(CatalogStore.self) private var catalog
     @Environment(AppSettings.self) private var settings
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var device = device
@@ -35,5 +36,6 @@ struct RootView: View {
                 .interactiveDismissDisabled(device.isBusy)
         }
         .task { await catalog.refresh() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { device.refreshOfficial() } }   // back after hours
     }
 }

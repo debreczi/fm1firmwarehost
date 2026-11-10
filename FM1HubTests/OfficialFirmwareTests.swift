@@ -10,7 +10,8 @@ final class OfficialFirmwareTests: XCTestCase {
 
     func testItIsFoundByWhatItIsCalled() {
         for q in ["official", "Official firmware", "firmware", "M-VAVE", "mvave", "stock", "original", "factory", "recovery",
-                  "fm-1", "FM-1_015", "FM-1_016", "v15", "V16", "Official V16"] {
+                  "fm-1", "fm1", "FM-1_015", "FM-1_016", "v15", "V16", "Official V16", "M-VAVE's", "M-VAVE\u{2019}s firmware",
+                  "latest", "current", "update"] {
             XCTAssertTrue(OfficialFirmware.matches(q, latest: "FM-1_016"), q)
         }
     }

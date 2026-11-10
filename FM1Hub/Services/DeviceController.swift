@@ -95,8 +95,9 @@ final class DeviceController {
     /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
     private(set) var officialLatest: String?
     private(set) var officialChecking = false
-    /// m-vave.com answered at least once since the app started.
-    private(set) var officialChecked = false
+    /// When m-vave.com last answered, and when the app last asked it.
+    private var officialCheckedAt: Date?
+    private var officialTriedAt: Date?
     private var officialTask: Task<Void, Never>?
     var statusMessage: String = ""
     var showJobSheet = false
@@ -190,10 +191,17 @@ final class DeviceController {
         otherPorts.removeAll { $0 == name }
     }
 
-    /// Asks m-vave.com once per launch, in a task of its own that no screen cancels when it goes away, so the Firmwares
-    /// and FM-1 tabs share one download. A check that failed runs again the next time a screen asks.
-    func checkOfficialOnce() {
-        guard !officialChecked, officialTask == nil, !Demo.isOn else { return }
+    /// Asks m-vave.com which official version is current, in a task of its own that no screen cancels when it goes
+    /// away, so the tabs share one download. Without `force` it asks only when the last answer is some hours old, or a
+    /// minute after a try that failed; pull to refresh forces it.
+    func refreshOfficial(force: Bool = false) {
+        guard officialTask == nil, !Demo.isOn else { return }
+        let now = Date()
+        if !force {
+            if let t = officialCheckedAt, now.timeIntervalSince(t) < 6 * 3600 { return }
+            if let t = officialTriedAt, now.timeIntervalSince(t) < 60 { return }
+        }
+        officialTriedAt = now
         officialTask = Task { [weak self] in
             await self?.checkOfficial()
             self?.officialTask = nil
@@ -207,7 +215,7 @@ final class DeviceController {
         defer { officialChecking = false }
         if let p = try? await packages.officialLatest() {
             officialLatest = p.product
-            officialChecked = true
+            officialCheckedAt = Date()
             append("official firmware on m-vave.com: \(p.product)")
         }
     }

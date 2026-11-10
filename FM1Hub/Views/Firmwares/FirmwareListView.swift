@@ -16,6 +16,13 @@ struct FirmwareListView: View {
     /// The filter for newer FM-1s keeps it: it runs on both chips.
     private var showOfficial: Bool { selected.isEmpty && OfficialFirmware.matches(query, latest: device.officialLatest) }
 
+    /// Would the search alone find catalogue firmwares that the filters hide? Then the empty list says so, under the
+    /// official card too.
+    private var filtersHideMatches: Bool {
+        let q = query.lowercased().split(separator: " ").map(String.init)
+        return catalog.firmwares.contains { f in q.allSatisfy { f.searchText.contains($0) } }
+    }
+
     private var filtered: [Firmware] {
         let q = query.lowercased().split(separator: " ").map(String.init)
         var list = catalog.firmwares.filter { f in
@@ -53,8 +60,11 @@ struct FirmwareListView: View {
                         if catalog.loading { ProgressView("Loading the catalogue…").padding(40) }
                         else { EmptyState(icon: "wifi.exclamationmark", title: "No catalogue yet", text: catalog.error ?? "Pull to refresh.") }
                     } else if filtered.isEmpty {
-                        // when the official card above matches, that is the answer
-                        if !showOfficial { EmptyState(icon: "line.3.horizontal.decrease.circle", title: "Nothing matches", text: "Loosen the filters or the search.") }
+                        // when the official card above is all the search finds, that is the answer
+                        if !showOfficial || filtersHideMatches {
+                            EmptyState(icon: "line.3.horizontal.decrease.circle", title: showOfficial ? "No other firmware matches" : "Nothing matches",
+                                       text: "Loosen the filters or the search.")
+                        }
                     } else if settings.gridView {
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                             ForEach(filtered) { f in
@@ -73,7 +83,7 @@ struct FirmwareListView: View {
             }
             .hubBackground()
             .scrollContentBackground(.hidden)
-            .refreshable { device.checkOfficialOnce(); await catalog.refresh(force: true) }
+            .refreshable { await device.refreshOfficial(force: true); await catalog.refresh(force: true) }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search name, maker, what it does")
             .navigationTitle("Firmwares")
             .navigationDestination(for: Firmware.self) { FirmwareDetailView(firmware: $0) }
@@ -100,7 +110,7 @@ struct FirmwareListView: View {
                 FilterSheet().presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
             .installPrompt($prompt) { settings.newerChipOnly = true }
-            .onAppear { device.checkOfficialOnce() }   // the official card's version
+            .onAppear { device.refreshOfficial() }   // the official card's version
         }
     }
 
