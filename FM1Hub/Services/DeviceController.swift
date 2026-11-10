@@ -100,6 +100,11 @@ final class DeviceController {
         get { UserDefaults.standard.object(forKey: "officialCheckedAt") as? Date }
         set { UserDefaults.standard.set(newValue, forKey: "officialCheckedAt") }
     }
+    /// What it answered then ("FM-1_016"): the time counts only while the version shown is that answer.
+    private var officialCheckedProduct: String? {
+        get { UserDefaults.standard.string(forKey: "officialCheckedProduct") }
+        set { UserDefaults.standard.set(newValue, forKey: "officialCheckedProduct") }
+    }
     private var officialTriedAt: Date?
     private var officialTask: Task<Void, Never>?
     var statusMessage: String = ""
@@ -202,8 +207,8 @@ final class DeviceController {
         guard officialTask == nil, !isBusy, !Demo.isOn else { return }
         let now = Date()
         if !force {
-            if officialLatest != nil, let t = officialCheckedAt, now.timeIntervalSince(t) < 6 * 3600 { return }
-            if let t = officialTriedAt, now.timeIntervalSince(t) < 600 { return }
+            if let l = officialLatest, l == officialCheckedProduct, let t = officialCheckedAt, t <= now, now.timeIntervalSince(t) < 6 * 3600 { return }
+            if let t = officialTriedAt, t <= now, now.timeIntervalSince(t) < 600 { return }
         }
         officialTriedAt = now
         officialTask = Task { [weak self] in
@@ -220,6 +225,7 @@ final class DeviceController {
         if let p = try? await packages.officialLatest() {
             officialLatest = p.product
             officialCheckedAt = Date()
+            officialCheckedProduct = p.product
             append("official firmware on m-vave.com: \(p.product)")
         }
     }
@@ -359,12 +365,12 @@ final class DeviceController {
     }
 
     /// M-VAVE's own firmware: the current one from their server (`latest`), or the V15 recovery image from the hub.
-    func installOfficial(latest: Bool, consent: ChipVerdict = .install) {
+    /// `shown`: the identity the question named ("FM-1_016"), so the result can say when M-VAVE's file has changed since.
+    func installOfficial(latest: Bool, shown: String? = nil, consent: ChipVerdict = .install) {
         guard !isBusy else { return }
         let title = latest ? "Official firmware" : "Official firmware V15"
         var j = DeviceJob(kind: .official, title: title, subtitle: latest ? "M-VAVE's current release" : "M-VAVE's recovery image, from the hub", colour: Color(hex: "#9aa4b2"), imageURL: nil)
         var product = latest ? (officialLatest ?? "") : FWSCPackage.stockV15Product
-        let shown = officialLatest       // the version the screen named when the user said yes
         start(job: j) { [self] in
             let before = identity?.text
             try await autoSnapshotIfWanted()
@@ -376,7 +382,7 @@ final class DeviceController {
                     pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
                 } catch {
                     guard let cached = try? await packages.officialLatest(cachedOnly: true) else { throw error }
-                    append("m-vave.com's file couldn't be fetched (\(error.localizedDescription)), using the cached \(cached.product)")
+                    append("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), using the cached \(cached.product)")
                     pkg = cached
                     fromPhone = true
                 }
@@ -393,7 +399,7 @@ final class DeviceController {
                                       identityBefore: before, identityAfter: after, source: .stock, success: true))
             j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
             if fromPhone {
-                j.message += " m-vave.com's file couldn't be fetched, so the copy on this phone was used."
+                j.message += " m-vave.com's file couldn't be fetched or wasn't accepted, so the copy on this phone was used."
             } else if latest, let s = shown, s != pkg.product, let v = FWSCPackage.officialVersion(of: s) {
                 j.message += " The app had shown \(v): M-VAVE's file has changed since."
             }

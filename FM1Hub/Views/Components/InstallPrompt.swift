@@ -16,12 +16,13 @@ extension InstallPrompt {
     /// The same question on the FM-1 tab and the Firmwares tab.
     @MainActor
     static func official(latest: Bool, device: DeviceController) -> InstallPrompt {
-        InstallPrompt(title: latest ? "Install M-VAVE's current firmware\(device.officialLatestVersion.map { " (\($0))" } ?? "")?" : "Back to the official V15?",
+        let shown = device.officialLatest       // the version this question names
+        return InstallPrompt(title: latest ? "Install M-VAVE's current firmware\(device.officialLatestVersion.map { " (\($0))" } ?? "")?" : "Back to the official V15?",
                       message: latest
-                          ? "The file M-VAVE publishes on m-vave.com, fetched now, or the copy on this phone when it can't be fetched; its identity is read from the file before anything is written."
+                          ? "The file M-VAVE publishes on m-vave.com, fetched now, or the copy on this phone when it can't be fetched or isn't accepted; its identity is read from the file before anything is written."
                           : "M-VAVE's own FM-1 V15 as the hub serves it: the recovery image, checked byte for byte (SHA-256) before anything is written.",
                       confirm: latest ? "Install the latest official" : "Install V15",
-                      verdict: device.chipVerdict(.official)) { consent in device.installOfficial(latest: latest, consent: consent) }
+                      verdict: device.chipVerdict(.official)) { consent in device.installOfficial(latest: latest, shown: shown, consent: consent) }
     }
 }
 
