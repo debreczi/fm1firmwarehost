@@ -400,6 +400,7 @@ final class DeviceController {
                 do {
                     pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
                 } catch {
+                    if Task.isCancelled { throw FM1Error.cancelled }   // Cancel, not "m-vave.com can't be reached"
                     // the hub's V15 is not M-VAVE's latest: "Back to V15" is the way to that one
                     guard let cached = try? await packages.officialLatest(cachedOnly: true), !cached.isStockV15 else {
                         throw FM1Error.package("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), and no copy of it is on this phone. Try again online, or use Back to V15 for the recovery image.")
