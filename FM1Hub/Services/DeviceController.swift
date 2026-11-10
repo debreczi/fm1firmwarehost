@@ -97,13 +97,13 @@ final class DeviceController {
     private(set) var officialChecking = false
     /// When m-vave.com last answered, kept across launches (its file is kept too), and when the app last asked it.
     private var officialCheckedAt: Date? {
-        get { UserDefaults.standard.object(forKey: "officialCheckedAt") as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: "officialCheckedAt") }
+        get { UserDefaults.standard.object(forKey: PackageStore.officialCheckedAtKey) as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: PackageStore.officialCheckedAtKey) }
     }
     /// What it answered then ("FM-1_016"): the time counts only while the version shown is that answer.
     private var officialCheckedProduct: String? {
-        get { UserDefaults.standard.string(forKey: "officialCheckedProduct") }
-        set { UserDefaults.standard.set(newValue, forKey: "officialCheckedProduct") }
+        get { UserDefaults.standard.string(forKey: PackageStore.officialCheckedProductKey) }
+        set { UserDefaults.standard.set(newValue, forKey: PackageStore.officialCheckedProductKey) }
     }
     private var officialTriedAt: Date?
     private var officialTask: Task<Void, Never>?
@@ -121,7 +121,8 @@ final class DeviceController {
             Task { @MainActor in self?.setupChanged() }
         }
         refreshPorts()
-        officialLatest = packages.newestCachedOfficial()?.product
+        // only a file m-vave.com once answered with: the hub's V15 is not M-VAVE's latest
+        officialLatest = packages.newestCachedOfficial().flatMap { $0.isStockV15 ? nil : $0.product }
     }
 
     var whoIs: WhoIs? { catalog.whoIs(identity?.text, named: reportedName) }
@@ -201,8 +202,8 @@ final class DeviceController {
 
     /// Asks m-vave.com which official version is current, in a task of its own that no screen cancels when it goes
     /// away, so the tabs share one download. Without `force` it asks only when the last answer is some hours old, or ten
-    /// minutes after a try that failed (offline, or a file the app didn't accept); pull to refresh forces it. Never
-    /// while the FM-1 is busy.
+    /// minutes after a try that failed (offline, or a file the app didn't accept); pull to refresh forces it. None
+    /// starts while the FM-1 is busy.
     func refreshOfficial(force: Bool = false) {
         guard officialTask == nil, !isBusy, !Demo.isOn else { return }
         let now = Date()
@@ -386,7 +387,11 @@ final class DeviceController {
                     pkg = cached
                     fromPhone = true
                 }
-                officialLatest = pkg.product
+                if !fromPhone {           // m-vave.com answered: the phone's copy says nothing of what it publishes
+                    officialLatest = pkg.product
+                    officialCheckedAt = Date()
+                    officialCheckedProduct = pkg.product
+                }
             } else {
                 pkg = try await packages.stockPackage(catalog.stock) { p in Task { @MainActor in self.phase = .downloading(p) } }
             }

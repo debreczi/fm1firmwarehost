@@ -26,7 +26,6 @@ struct DeviceView: View {
                 .padding(16)
             }
             .hubBackground()
-            .refreshable { await device.refreshOfficial(force: true) }   // asks m-vave.com for its current version
             .navigationTitle("Your FM-1")
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .item], allowsMultipleSelection: false) { result in
                 // a moment after the picker has gone, so that what this shows next can be shown

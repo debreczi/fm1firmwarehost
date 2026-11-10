@@ -265,7 +265,14 @@ final class PackageStore {
 
     func cacheSize() -> Int64 { Paths.size(of: Paths.packages) }
 
+    /// m-vave.com's last answer, which the device layer keeps: when, and which identity.
+    static let officialCheckedAtKey = "officialCheckedAt"
+    static let officialCheckedProductKey = "officialCheckedProduct"
+
     func clearCache() {
         for u in cachedFiles() { try? FileManager.default.removeItem(at: u) }
+        // that answer's file is gone with them: the next check must not be skipped
+        UserDefaults.standard.removeObject(forKey: Self.officialCheckedAtKey)
+        UserDefaults.standard.removeObject(forKey: Self.officialCheckedProductKey)
     }
 }
