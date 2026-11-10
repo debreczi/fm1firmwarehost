@@ -11,6 +11,20 @@ struct InstallPrompt: Identifiable {
     var run: @MainActor (ChipVerdict) -> Void
 }
 
+extension InstallPrompt {
+    /// M-VAVE's own firmware: the current release from m-vave.com (`latest`) or the V15 recovery image from the hub.
+    /// The same question on the FM-1 tab and the Firmwares tab.
+    @MainActor
+    static func official(latest: Bool, device: DeviceController) -> InstallPrompt {
+        InstallPrompt(title: latest ? "Install M-VAVE's current firmware\(device.officialLatestVersion.map { " (\($0))" } ?? "")?" : "Back to the official V15?",
+                      message: latest
+                          ? "The file M-VAVE publishes on m-vave.com, fetched now; its identity is read from the file before anything is written."
+                          : "M-VAVE's own FM-1 V15 as the hub serves it: the recovery image, checked byte for byte (SHA-256) before anything is written.",
+                      confirm: latest ? "Install the latest official" : "Install V15",
+                      verdict: device.chipVerdict(.official)) { consent in device.installOfficial(latest: latest, consent: consent) }
+    }
+}
+
 extension View {
     /// Asks before an install: the usual confirmation when the flash chip check has nothing to say, a red warning sheet
     /// when it warns or the install is dangerous, and a refusal otherwise. `showSafe` opens the firmwares that work on

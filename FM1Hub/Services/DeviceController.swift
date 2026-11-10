@@ -95,6 +95,8 @@ final class DeviceController {
     /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
     private(set) var officialLatest: String?
     private(set) var officialChecking = false
+    /// m-vave.com answered at least once since the app started.
+    private(set) var officialChecked = false
     var statusMessage: String = ""
     var showJobSheet = false
 
@@ -194,6 +196,7 @@ final class DeviceController {
         defer { officialChecking = false }
         if let p = try? await packages.officialLatest() {
             officialLatest = p.product
+            officialChecked = true
             append("official firmware on m-vave.com: \(p.product)")
         }
     }

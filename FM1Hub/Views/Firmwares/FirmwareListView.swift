@@ -12,6 +12,10 @@ struct FirmwareListView: View {
 
     private var selected: Set<String> { Set(settings.selectedKinds) }
 
+    /// M-VAVE's own firmware comes first, unless a kind is picked (it is none) or the search is for something else.
+    /// The filter for newer FM-1s keeps it: it runs on both chips.
+    private var showOfficial: Bool { selected.isEmpty && OfficialFirmware.matches(query, latestVersion: device.officialLatestVersion) }
+
     private var filtered: [Firmware] {
         let q = query.lowercased().split(separator: " ").map(String.init)
         var list = catalog.firmwares.filter { f in
@@ -44,6 +48,7 @@ struct FirmwareListView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     header
+                    if showOfficial { OfficialFirmwareCard { latest in prompt = .official(latest: latest, device: device) } }
                     if catalog.firmwares.isEmpty {
                         if catalog.loading { ProgressView("Loading the catalogue…").padding(40) }
                         else { EmptyState(icon: "wifi.exclamationmark", title: "No catalogue yet", text: catalog.error ?? "Pull to refresh.") }
@@ -94,6 +99,7 @@ struct FirmwareListView: View {
                 FilterSheet().presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
             .installPrompt($prompt) { settings.newerChipOnly = true }
+            .task { if !device.officialChecked { await device.checkOfficial() } }   // its version, once per launch
         }
     }
 

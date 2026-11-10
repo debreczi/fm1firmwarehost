@@ -1,15 +1,16 @@
 import SwiftUI
 
-/// Which flash chips a firmware works on, as a chip on its card. A firmware that does not check the chip gets none.
+/// Which flash chips a firmware works on, as a chip on its card. M-VAVE's own runs on both. A firmware that does not
+/// check the chip gets none.
 struct ChipSupportChip: View {
     let support: ChipSupport
     var filled = false
 
     var body: some View {
         switch support {
-        case .new: Chip(text: "newer FM-1s too", icon: "checkmark", tint: Theme.ok, filled: filled)
+        case .new, .official: Chip(text: "newer FM-1s too", icon: "checkmark", tint: Theme.ok, filled: filled)
         case .old: Chip(text: "first FM-1s only", icon: "exclamationmark.triangle", tint: Theme.warn, filled: filled)
-        case .any, .official, .unknown: EmptyView()
+        case .any, .unknown: EmptyView()
         }
     }
 
