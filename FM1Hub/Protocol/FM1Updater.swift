@@ -62,9 +62,6 @@ final class FM1Updater {
     var probeAll = false
     /// Identities of firmwares built on M-VAVE's own code: they are sent only the plain identity request, as M-VAVE's are.
     var plainOnly: Set<String> = []
-    /// Identities that look like M-VAVE's (FM-1_0xx) but that community firmwares in the catalogue report: they are
-    /// asked the full identity request like any other community firmware.
-    var alsoAskFull: Set<String> = []
     /// The port and flash chip report of the device that came back after an install or a resume.
     private(set) var cameBack: (port: String, flashID: UInt32?)?
     var log: (String) -> Void = { _ in }
@@ -99,9 +96,7 @@ final class FM1Updater {
             }
         }
         guard let plain = reply else { return nil }
-        guard askFull, !plainOnly.contains(plain.identity.text),
-              FM1Protocol.asksFullIdentity(after: plain.identity) || (alsoAskFull.contains(plain.identity.text) && !plain.identity.isLoader)
-        else { return plain }
+        guard askFull, !plainOnly.contains(plain.identity.text), FM1Protocol.asksFullIdentity(after: plain.identity) else { return plain }
         link.drain()   // an answer to a repeated plain request is not the full one
         guard link.send(FM1Protocol.fullHandshakeQuery) else { return plain }
         let end = Date().addingTimeInterval(0.5)

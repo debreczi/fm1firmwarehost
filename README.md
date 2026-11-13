@@ -141,7 +141,8 @@ body) the app sends the full one (cmd `0x11` with the one-byte body `01`, PERF-1
 to every firmware except M-VAVE's own (`FM-1_0xx`) and those built on its code (`loader: mvave`), the USB rescue
 mode and update loaders. A firmware that knows it
 answers with its whole identity and may put the chip's ID in bytes 24–26 of the 27-byte reply, high byte first (0: not
-read). The reply's text ends at its first zero. M-VAVE's firmware never reports the chip, so most of the time it is
+read). The reply's text ends at its first zero. The first FM-1s' chip counts only from a reply whose length and
+checksum hold; another chip counts from any reply, since it can only add a warning. M-VAVE's firmware never reports the chip, so most of the time it is
 "not reported" and a newer FM-1 can't be told from a first one.
 
 **Which firmwares work on it.** The hub's catalogue has a `chip` field for each firmware, which the hub reads from the

@@ -102,8 +102,9 @@ enum FM1Protocol {
 
     /// The identity reply: 27 bytes, the text up to its first zero, then zeros, and in bytes 24-26 (high byte first) the
     /// flash's JEDEC ID when the firmware sends it (0: not sent). Binary can follow the text, so it ends at its first
-    /// zero, as felucca-bsp tells hosts to read it. The chip ID counts only from a reply whose length and checksum hold,
-    /// as a read request's must; the identity stands without them, as it always has.
+    /// zero, as felucca-bsp tells hosts to read it. The first FM-1s' chip counts only from a reply whose length and
+    /// checksum hold, as a read request's must; another chip may warn from any reply, never hide a warning (as in
+    /// `merge`). The identity stands without them, as it always has.
     static func parseHello(_ pkt: [UInt8]) -> FM1Hello? {
         guard pkt.count > 2, pkt.first == 0xF0, pkt.last == 0xF7 else { return nil }
         let d = SevenBit.unpack7(pkt[1..<(pkt.count - 1)])
@@ -114,8 +115,8 @@ enum FM1Protocol {
         let sum = body.reduce(0) { $0 + Int($1) }
         let intact = d[3] == 27 && d[4] == 0 && d[5] == 0 && UInt8(truncatingIfNeeded: ~sum) == d[33]
         // only where the text has ended before them can those bytes be the chip's
-        let jedec = intact && end < 24 ? UInt32(body[24]) << 16 | UInt32(body[25]) << 8 | UInt32(body[26]) : 0
-        return FM1Hello(identity: id, flashID: jedec == 0 ? nil : jedec)
+        let jedec = end < 24 ? UInt32(body[24]) << 16 | UInt32(body[25]) << 8 | UInt32(body[26]) : 0
+        return FM1Hello(identity: id, flashID: jedec == 0 || (!intact && jedec == FlashChip.first) ? nil : jedec)
     }
 
     /// Is the full identity request worth sending to a device that answered the plain one with this? Not to M-VAVE's

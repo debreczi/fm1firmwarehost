@@ -143,7 +143,6 @@ final class DeviceController {
         u.probeAll = settings.probeAllPorts
         u.chosenPorts = Set(settings.chosenPorts)
         u.plainOnly = Set(catalog.firmwares.filter(\.usesStockLoader).map(\.product))
-        u.alsoAskFull = Set(catalog.firmwares.map(\.product).filter(FWSCPackage.isOfficialProduct))
         u.log = { [weak self] s in Task { @MainActor in self?.append(s) } }
         updater = u
         return u
@@ -338,6 +337,14 @@ final class DeviceController {
         return packages.seenChip(sha256)
     }
 
+    /// May M-VAVE's update loader write this package? By its hash alone: M-VAVE's own, or one the hub says is built
+    /// on M-VAVE's code, now or when the app last read the catalogue. Never what a backup's files say.
+    private func usesStockLoader(_ sha256: String) -> Bool {
+        if packages.isFetchedOfficial(sha256) { return true }
+        if let f = catalog.firmwares.first(where: { $0.sha256 == sha256 }) { return f.usesStockLoader }
+        return packages.seenStockLoader(sha256)
+    }
+
     func chipSupport(of s: Snapshot) -> ChipSupport {
         chipSupport(sha256: s.packageSHA256 ?? "", product: s.product ?? s.identity)
     }
@@ -475,7 +482,7 @@ final class DeviceController {
             j.subtitle = known.map { "\($0.version) · \(url.lastPathComponent)" } ?? url.lastPathComponent
             if let k = known { j.colour = Look.colour(for: k.id); j.imageURL = k.imageURL }
             try await autoSnapshotIfWanted()
-            let after = try await flash(pkg, product: pkg.product, stockLoader: packages.isFetchedOfficial(pkg.sha256) || known?.usesStockLoader == true,
+            let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg.sha256),
                                         name: j.title, version: known?.version ?? "", firmwareId: known?.id, source: .file,
                                         consent: consent)
             library.add(InstallRecord(firmwareId: known?.id, name: j.title, version: known?.version ?? "", product: pkg.product, sha256: pkg.sha256,
@@ -1012,9 +1019,7 @@ final class DeviceController {
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
             if catalog.ownInstaller(of: s) != nil { throw FM1Error.package("\(s.firmwareName) is installed by its maker's own page: the package alone is not all of it.") }
             try await autoSnapshotIfWanted()
-            // whose loader it may use, by its hash: never what the backup's files say
-            let stock = packages.isFetchedOfficial(pkg.sha256) || catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 })?.usesStockLoader == true
-            let after = try await flash(pkg, product: pkg.product, stockLoader: stock,
+            let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg.sha256),
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot,
                                         consent: consent)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,

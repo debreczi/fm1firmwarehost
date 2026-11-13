@@ -71,20 +71,33 @@ final class PackageStore {
     }
 
     private static let chipKey = "chipBySHA256"
+    private static let stockLoaderKey = "stockLoaderSHA256s"
 
-    /// The hub's word on each package's flash chips, kept in the app's own storage whenever the app reads the catalogue,
-    /// so it still counts once the catalogue lists a newer version. A backup's or record's files, which can be edited,
-    /// never stand in for it.
+    /// The hub's word on each package, kept in the app's own storage whenever the app reads the catalogue, so it still
+    /// counts once the catalogue lists a newer version: which flash chips it works on, and whether it is built on
+    /// M-VAVE's code (and so written by M-VAVE's update loader). The latest word wins, silence too. A backup's or
+    /// record's files, which can be edited, never stand in for it.
     func noteChips(_ firmwares: [Firmware]) {
         var all = UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String] ?? [:]
         var changed = false
-        for f in firmwares {
+        var stock = Set(UserDefaults.standard.stringArray(forKey: Self.stockLoaderKey) ?? [])
+        let stockBefore = stock
+        for f in firmwares where !f.sha256.isEmpty {
             let c = f.chipSupport
-            guard !f.sha256.isEmpty, c == .new || c == .any || c == .old, all[f.sha256] != c.rawValue else { continue }
-            all[f.sha256] = c.rawValue
-            changed = true
+            if c == .new || c == .any || c == .old {
+                if all[f.sha256] != c.rawValue { all[f.sha256] = c.rawValue; changed = true }
+            } else if all.removeValue(forKey: f.sha256) != nil {
+                changed = true              // the hub took its word back
+            }
+            if f.usesStockLoader { stock.insert(f.sha256) } else { stock.remove(f.sha256) }
         }
         if changed { UserDefaults.standard.set(all, forKey: Self.chipKey) }
+        if stock != stockBefore { UserDefaults.standard.set(Array(stock), forKey: Self.stockLoaderKey) }
+    }
+
+    /// Did the hub say, when the app last read it, that this package is built on M-VAVE's code?
+    func seenStockLoader(_ sha256: String) -> Bool {
+        (UserDefaults.standard.stringArray(forKey: Self.stockLoaderKey) ?? []).contains(sha256)
     }
 
     /// What the catalogue last said of this package when the app read it, or unknown.

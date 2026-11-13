@@ -96,13 +96,13 @@ final class FlashChipTests: XCTestCase {
         try JSONDecoder().decode(Catalog.self, from: Data(#"{"firmwares":[\#(entries.joined(separator: ","))]}"#.utf8)).firmwares
     }
 
-    private func entry(_ id: String, chip: String?) -> String {
-        let c = chip.map { #","chip":"\#($0)""# } ?? ""
+    private func entry(_ id: String, chip: String?, loader: String? = nil) -> String {
+        let c = (chip.map { #","chip":"\#($0)""# } ?? "") + (loader.map { #","loader":"\#($0)""# } ?? "")
         return #"{"id":"\#(id)","name":"\#(id)","pkg":"fw/\#(id).fwsc","product":"FM-1_900","sha256":"\#(id)"\#(c)}"#
     }
 
     /// What the hub said of a package is kept in the app's own storage, by hash: it still counts once the catalogue
-    /// moves on, a later word replaces it, and silence takes nothing back.
+    /// moves on, and a later word replaces it, silence too.
     func testTheHubsWordIsKeptByHash() throws {
         let id = "kept-\(UUID().uuidString)"
         XCTAssertEqual(PackageStore.shared.seenChip(id), .unknown)
@@ -111,8 +111,13 @@ final class FlashChipTests: XCTestCase {
         PackageStore.shared.noteChips(try catalogue([entry(id, chip: "new")]))
         XCTAssertEqual(PackageStore.shared.seenChip(id), .new)
         PackageStore.shared.noteChips(try catalogue([entry(id, chip: nil)]))
-        XCTAssertEqual(PackageStore.shared.seenChip(id), .new)
+        XCTAssertEqual(PackageStore.shared.seenChip(id), .unknown, "the hub took its word back")
         XCTAssertEqual(PackageStore.shared.seenChip("never-\(UUID().uuidString)"), .unknown)
+        XCTAssertFalse(PackageStore.shared.seenStockLoader(id))
+        PackageStore.shared.noteChips(try catalogue([entry(id, chip: "any", loader: "mvave")]))
+        XCTAssertTrue(PackageStore.shared.seenStockLoader(id), "built on M-VAVE's code: its loader writes it")
+        PackageStore.shared.noteChips(try catalogue([entry(id, chip: "any")]))
+        XCTAssertFalse(PackageStore.shared.seenStockLoader(id))
     }
 
     func testTheCataloguesChipField() throws {
@@ -201,8 +206,10 @@ final class IdentityReplyTests: XCTestCase {
     func testAChipIDCountsOnlyFromAnIntactReply() {
         let broken = FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.first, checksumOffset: 1))
         XCTAssertEqual(broken?.identity.text, "FM-1_378011", "the identity stands, as it always has")
-        XCTAssertNil(broken?.flashID, "a chip ID from a reply that doesn't add up counts as not reported")
-        XCTAssertNil(FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.newer, length: 26))?.flashID)
+        XCTAssertNil(broken?.flashID, "the first FM-1s' chip from a reply that doesn't add up counts as not reported")
+        XCTAssertEqual(FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.newer, checksumOffset: 1))?.flashID, FlashChip.newer,
+                       "another chip may warn from any reply")
+        XCTAssertNil(FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.first, length: 26))?.flashID)
         XCTAssertEqual(FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.newer))?.flashID, FlashChip.newer)
     }
 
