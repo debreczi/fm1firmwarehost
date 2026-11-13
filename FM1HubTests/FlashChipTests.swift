@@ -102,7 +102,7 @@ final class FlashChipTests: XCTestCase {
     }
 
     /// What the hub said of a package is kept in the app's own storage, by hash: it still counts once the catalogue
-    /// moves on, and a later word replaces it, silence too.
+    /// moves on, a later word replaces it, and silence takes back only a claim that it is safe.
     func testTheHubsWordIsKeptByHash() throws {
         let id = "kept-\(UUID().uuidString)"
         XCTAssertEqual(PackageStore.shared.seenChip(id), .unknown)
@@ -111,7 +111,15 @@ final class FlashChipTests: XCTestCase {
         PackageStore.shared.noteChips(try catalogue([entry(id, chip: "new")]))
         XCTAssertEqual(PackageStore.shared.seenChip(id), .new)
         PackageStore.shared.noteChips(try catalogue([entry(id, chip: nil)]))
-        XCTAssertEqual(PackageStore.shared.seenChip(id), .unknown, "the hub took its word back")
+        XCTAssertEqual(PackageStore.shared.seenChip(id), .unknown, "the hub no longer says it is safe")
+        let old = "kept-old-\(UUID().uuidString)"
+        PackageStore.shared.noteChips(try catalogue([entry(old, chip: "old")]))
+        PackageStore.shared.noteChips(try catalogue([entry(old, chip: nil)]))
+        XCTAssertEqual(PackageStore.shared.seenChip(old), .old, "silence never makes a package safe")
+        PackageStore.shared.noteChips(try catalogue([entry(old, chip: "both")]))
+        XCTAssertEqual(PackageStore.shared.seenChip(old), .old, "nor does a value the app doesn't know")
+        PackageStore.shared.noteChips(try catalogue([entry(old, chip: "any")]))
+        XCTAssertEqual(PackageStore.shared.seenChip(old), .any, "the hub's own word does")
         XCTAssertEqual(PackageStore.shared.seenChip("never-\(UUID().uuidString)"), .unknown)
         XCTAssertFalse(PackageStore.shared.seenStockLoader(id))
         PackageStore.shared.noteChips(try catalogue([entry(id, chip: "any", loader: "mvave")]))

@@ -75,8 +75,9 @@ final class PackageStore {
 
     /// The hub's word on each package, kept in the app's own storage whenever the app reads the catalogue, so it still
     /// counts once the catalogue lists a newer version: which flash chips it works on, and whether it is built on
-    /// M-VAVE's code (and so written by M-VAVE's update loader). The latest word wins, silence too. A backup's or
-    /// record's files, which can be edited, never stand in for it.
+    /// M-VAVE's code (and so written by M-VAVE's update loader). The latest word wins; silence, or a value the app
+    /// doesn't know, takes back only a claim that a package is safe on newer FM-1s, never "the first FM-1s only". A
+    /// backup's or record's files, which can be edited, never stand in for it.
     func noteChips(_ firmwares: [Firmware]) {
         var all = UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String] ?? [:]
         var changed = false
@@ -86,8 +87,9 @@ final class PackageStore {
             let c = f.chipSupport
             if c == .new || c == .any || c == .old {
                 if all[f.sha256] != c.rawValue { all[f.sha256] = c.rawValue; changed = true }
-            } else if all.removeValue(forKey: f.sha256) != nil {
-                changed = true              // the hub took its word back
+            } else if let was = all[f.sha256], was != ChipSupport.old.rawValue {
+                all.removeValue(forKey: f.sha256)   // the hub no longer says it is safe
+                changed = true
             }
             if f.usesStockLoader { stock.insert(f.sha256) } else { stock.remove(f.sha256) }
         }
