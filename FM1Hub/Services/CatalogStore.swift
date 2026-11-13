@@ -57,7 +57,7 @@ final class CatalogStore {
     }
 
     /// `fresh`: the hub's catalogue of now, which the app's record of its word follows; a cached copy may be older,
-    /// so it never writes that record.
+    /// so it only ever adds "the first FM-1s only" to that record, which can only make the check stricter.
     @discardableResult
     func apply(_ data: Data, fresh: Bool = true) -> Bool {
         guard let cat = try? JSONDecoder().decode(Catalog.self, from: data) else { return false }
@@ -65,7 +65,7 @@ final class CatalogStore {
         stock = cat.stock
         creators = cat.creators ?? [:]
         updated = cat.updated
-        if fresh { PackageStore.shared.noteChips(firmwares) }   // still the hub's word once it lists a newer version
+        PackageStore.shared.noteChips(firmwares, onlyOld: !fresh)   // still the hub's word once it lists a newer version
         return true
     }
 

@@ -386,7 +386,11 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertTrue(now.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"old"}]}"#.utf8)))
         let cached = CatalogStore()
         XCTAssertTrue(cached.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"new"}]}"#.utf8), fresh: false))
-        XCTAssertEqual(PackageStore.shared.seenChip(sha), .old, "a cached catalogue writes nothing back")
+        XCTAssertEqual(PackageStore.shared.seenChip(sha), .old, "a cached catalogue's \"safe\" is never written back")
+        let dropped = "dropped-\(UUID().uuidString)"
+        let olderCache = CatalogStore()
+        XCTAssertTrue(olderCache.apply(Data(#"{"firmwares":[{"id":"y","name":"Y","pkg":"fw/y.fwsc","product":"FM-1_951","sha256":"\#(dropped)","chip":"old"}]}"#.utf8), fresh: false))
+        XCTAssertEqual(PackageStore.shared.seenChip(dropped), .old, "a cached catalogue may still add the first FM-1s only")
         withController(cached) { device, _ in
             XCTAssertEqual(device.chipSupport(sha256: sha, product: "FM-1_950"), .old)
         }

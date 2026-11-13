@@ -84,14 +84,19 @@ final class PackageStore {
     /// counts once the catalogue lists a newer version: which flash chips it works on, and whether it is built on
     /// M-VAVE's code (and so written by M-VAVE's update loader). The latest word wins; silence, or a value the app
     /// doesn't know, takes back only a claim that a package is safe on newer FM-1s, never "the first FM-1s only". A
-    /// backup's or record's files, which can be edited, never stand in for it.
-    func noteChips(_ firmwares: [Firmware]) {
+    /// backup's or record's files, which can be edited, never stand in for it. `onlyOld`: a catalogue from the phone's
+    /// cache, which may be older, only adds "the first FM-1s only".
+    func noteChips(_ firmwares: [Firmware], onlyOld: Bool = false) {
         var all = UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String] ?? [:]
         var changed = false
         var stock = Set(UserDefaults.standard.stringArray(forKey: Self.stockLoaderKey) ?? [])
         let stockBefore = stock
         for f in firmwares where !f.sha256.isEmpty {
             let c = f.chipSupport
+            if onlyOld {
+                if c == .old, all[f.sha256] != c.rawValue { all[f.sha256] = c.rawValue; changed = true }
+                continue
+            }
             if c == .new || c == .any || c == .old {
                 if all[f.sha256] != c.rawValue { all[f.sha256] = c.rawValue; changed = true }
             } else if let was = all[f.sha256], was != ChipSupport.old.rawValue {

@@ -189,7 +189,7 @@ final class DeviceController {
         }
         // the unit that reported a newer chip is gone, and no update is unfinished: the next FM-1 may be another one,
         // other MIDI gear still plugged in or not; while an update is unfinished this is the unit it was for
-        if !isBusy, let p = unsafePort, !midiPorts.contains(p), library.pending == nil { forgetUnsafe() }
+        if !isBusy, let p = unsafePort, !midiPorts.contains(p), !unsafeUnitOnline(), library.pending == nil { forgetUnsafe() }
         if midiPorts.isEmpty, !isBusy {
             identity = nil
             musicBackupSupported = nil
@@ -279,7 +279,9 @@ final class DeviceController {
                 otherPorts = []
                 statusMessage = ""
                 append("identity \(dev.identity.text) on \(dev.portName)")
-                noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint)
+                // the unit an unfinished update was written to, back after the app stopped waiting for it
+                let finishing = library.pending?.isFinished(by: dev.identity) == true
+                noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint, sameUnit: finishing)
                 musicBackupSupported = nil
                 reportedName = nil
                 reconcilePending(dev.identity)
@@ -335,7 +337,8 @@ final class DeviceController {
         reportPort = port
         let device = engine.device(of: endpoint)
         guard let id else {
-            if sameUnit, unsafeChip != nil { unsafeDevice = device; unsafePort = port }   // a firmware may name its port otherwise
+            // the same unit, whatever its firmware calls its port now
+            if unsafeChip != nil, sameUnit || (device != 0 && device == unsafeDevice) { unsafeDevice = device; unsafePort = port }
             return
         }
         if id != FlashChip.first {
@@ -345,6 +348,11 @@ final class DeviceController {
         } else if unsafeChip != nil, sameUnit || (device != 0 && device == unsafeDevice) {
             forgetUnsafe()
         }
+    }
+
+    /// Is the unit that reported the newer chip still here, under any port name?
+    private func unsafeUnitOnline() -> Bool {
+        unsafeDevice != 0 && engine.sources().contains { engine.device(of: $0.endpoint) == unsafeDevice }
     }
 
     private func forgetUnsafe() {

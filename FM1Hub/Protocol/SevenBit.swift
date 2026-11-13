@@ -182,7 +182,7 @@ enum FM1Error: LocalizedError {
         case .noRequests: return "Replug the USB cable and press Install again."
         case .noReturn: return "Power-cycle the FM-1. If it does not start, hold OCT− while switching it on and install again."
         case .stuck: return "A newer FM-1 stuck like this needs a computer: the hub's rescue page shows how. Otherwise, replug the USB cable and press Install again."
-        case .several: return "Unplug the other FM-1s, then try again."
+        case .several: return "Unplug the other FM-1s, or disconnect this one's Bluetooth or other-app connection, then try again."
         case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup, .chipCheck: return ""
         }
     }

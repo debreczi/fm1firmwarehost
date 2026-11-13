@@ -114,9 +114,11 @@ final class FM1Updater {
     }
 
     /// Every in/out pair whose name may be an FM-1 that answers the handshake. The caller closes the link.
-    func find(_ filter: (FM1Identity) -> Bool, askFull: Bool = true) async -> FM1Device? {
+    /// `excluding`: MIDI devices never to take (another unit's, during an update).
+    func find(_ filter: (FM1Identity) -> Bool, askFull: Bool = true, excluding: Set<MIDIDeviceRef> = []) async -> FM1Device? {
         for src in engine.sources() {
             if !mayProbe(src.name) { continue }
+            if !excluding.isEmpty, excluding.contains(engine.device(of: src.endpoint)) { continue }
             guard let dest = engine.destination(for: src.endpoint, named: src.name) else { continue }
             guard let link = engine.open(source: src.endpoint, destination: dest, name: src.name) else { continue }
             if let h = await handshake(link, tries: 2, askFull: askFull), filter(h.identity) {
@@ -146,9 +148,9 @@ final class FM1Updater {
             if d != 0 && d == mine { continue }
             guard let dest = engine.destination(for: src.endpoint, named: src.name),
                   let link = engine.open(source: src.endpoint, destination: dest, name: src.name) else { continue }
-            let h = await handshake(link, tries: 1, askFull: false)
+            let h = await handshake(link, tries: 2, askFull: false)
             link.close()
-            if let h, h.identity.modelWithoutLoader == dev.identity.modelWithoutLoader {
+            if let h, h.identity.modelWithoutLoader.lowercased() == dev.identity.modelWithoutLoader.lowercased() {
                 log("another FM-1 answers: \(h.identity.text) on \(src.name)")
                 return (h.identity, src.name)
             }
@@ -162,11 +164,12 @@ final class FM1Updater {
         return names.isEmpty ? " (MIDI: none)" : " (MIDI: \(names.joined(separator: ", ")))"
     }
 
-    func waitFor(_ filter: @escaping (FM1Identity) -> Bool, ms: Int, askFull: Bool = true) async -> FM1Device? {
+    func waitFor(_ filter: @escaping (FM1Identity) -> Bool, ms: Int, askFull: Bool = true,
+                 excluding: Set<MIDIDeviceRef> = []) async -> FM1Device? {
         let end = Date().addingTimeInterval(Double(ms) / 1000)
         while Date() < end {
             if cancelled { return nil }
-            if let dev = await find(filter, askFull: askFull) { return dev }
+            if let dev = await find(filter, askFull: askFull, excluding: excluding) { return dev }
             await sleep(ms: 1000)
         }
         return nil
@@ -225,7 +228,7 @@ final class FM1Updater {
         }
         if let other = await anotherFM1(than: dev) {
             dev.link.close()
-            throw FM1Error.several("Another FM-1 answers too (\(other.identity.text) on \(other.port)): nothing was written. Connect one FM-1 at a time.")
+            throw FM1Error.several("Another FM-1 answers too (\(other.identity.text) on \(other.port)): nothing was written. Connect one FM-1 at a time; if that is this same FM-1 over Bluetooth or through another app, disconnect it there.")
         }
         if cancelled {
             dev.link.close()
@@ -237,7 +240,8 @@ final class FM1Updater {
             dev.link.close()
             throw error
         }
-        // the MIDI devices here now besides this FM-1: an update loader on one of them later is another unit's
+        // the MIDI devices here now besides this FM-1: an FM-1 on one of them is another unit, never taken for this
+        // one's update loader or for this one coming back
         let mine = engine.device(of: dev.endpoint)
         let present = Set(engine.sources().map { engine.device(of: $0.endpoint) }).subtracting([mine, 0])
         onStep(.start(dev.identity.text))
@@ -260,7 +264,7 @@ final class FM1Updater {
         }
         onStep(.loader)
         await sleep(ms: 3000)
-        guard let ota = await waitFor({ $0.isLoader }, ms: 30000, askFull: false) else {
+        guard let ota = await waitFor({ $0.isLoader }, ms: 30000, askFull: false, excluding: present) else {
             if cancelled { throw FM1Error.cancelled }
             let now = await find({ _ in true }, askFull: false)
             now?.link.close()
@@ -270,12 +274,7 @@ final class FM1Updater {
             }
             throw FM1Error.noLoader("The update loader did not appear (\(why))\(seen()). Replug the USB cable and press Install again: the device stays in update mode until it is finished.")
         }
-        let otaDevice = engine.device(of: ota.endpoint)
-        if otaDevice != 0, present.contains(otaDevice) {
-            ota.link.close()
-            throw FM1Error.stopped("Another FM-1 answered in update mode (\(ota.identity.text) on \(ota.portName)): the update stopped before writing. Unplug the other FM-1s, then press Install again: this one stays in update mode until it is finished.")
-        }
-        if ota.identity.modelWithoutLoader != model {
+        if ota.identity.modelWithoutLoader.lowercased() != model.lowercased() {
             ota.link.close()
             throw FM1Error.stopped("An update loader for another model answered (\(ota.identity.text)), the package is for \(product): the update stopped before writing.")
         }
@@ -287,7 +286,7 @@ final class FM1Updater {
         }
         onStep(.reboot)
         await sleep(ms: 3000)
-        guard let back = await waitFor({ !$0.isLoader }, ms: 40000) else {
+        guard let back = await waitFor({ !$0.isLoader }, ms: 40000, excluding: present) else {
             throw FM1Error.noReturn("The device did not come back: power-cycle it.")
         }
         back.link.close()
@@ -336,7 +335,7 @@ final class FM1Updater {
         }
         if let other = await anotherFM1(than: ota) {
             ota.link.close()
-            throw FM1Error.several("Another FM-1 answers too (\(other.identity.text) on \(other.port)): nothing was written. Connect one FM-1 at a time.")
+            throw FM1Error.several("Another FM-1 answers too (\(other.identity.text) on \(other.port)): nothing was written. Connect one FM-1 at a time; if that is this same FM-1 over Bluetooth or through another app, disconnect it there.")
         }
         if cancelled {
             ota.link.close()
@@ -348,13 +347,16 @@ final class FM1Updater {
             ota.link.close()
             throw error
         }
+        // the MIDI devices here now besides this FM-1: an FM-1 on one of them is another unit, never taken for this one
+        let mine = engine.device(of: ota.endpoint)
+        let present = Set(engine.sources().map { engine.device(of: $0.endpoint) }).subtracting([mine, 0])
         let s2 = try await write(ota, image: image, onStep: onStep)
         if !s2.finished { return .interrupted }
         // Every package, not only the official ones: a write counts as finished when the device comes back and says
         // what it is. Reporting success without asking would let a device still stuck in the loader look recovered.
         onStep(.reboot)
         await sleep(ms: 3000)
-        guard let back = await waitFor({ !$0.isLoader }, ms: 40000) else {
+        guard let back = await waitFor({ !$0.isLoader }, ms: 40000, excluding: present) else {
             throw FM1Error.noReturn("The FM-1 did not come back after the write: power-cycle it.")
         }
         back.link.close()
