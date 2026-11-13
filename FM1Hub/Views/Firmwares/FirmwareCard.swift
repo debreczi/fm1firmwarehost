@@ -60,7 +60,7 @@ struct FirmwareCard: View {
                         HStack(spacing: 6) {
                             ForEach(firmware.allKinds, id: \.self) { k in Chip(text: Kinds.label(k), icon: Kinds.icon(k), tint: k == "vintage" ? Theme.warm : c) }
                             if let h = firmware.hid, !h.kinds.isEmpty { Chip(text: "USB \(h.kinds.joined(separator: "/"))", icon: "keyboard", tint: Theme.warn) }
-                            ChipSupportChip(support: firmware.chipSupport)
+                            ChipSupportChip(support: device.chipSupport(sha256: firmware.sha256, product: firmware.product))
                         }
                         Text(firmware.what).font(.system(size: 14)).foregroundStyle(.white.opacity(0.82)).lineLimit(3).multilineTextAlignment(.leading)
                         HStack(spacing: 10) {

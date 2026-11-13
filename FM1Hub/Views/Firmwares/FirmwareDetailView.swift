@@ -23,7 +23,7 @@ struct FirmwareDetailView: View {
                         HStack(spacing: 6) {
                             if onDevice { Chip(text: "on your FM-1", icon: "checkmark", tint: Theme.ok, filled: true) }
                             if firmware.beta && !firmware.isDevOnly { Chip(text: "beta", tint: Theme.warn, filled: true) }
-                            ChipSupportChip(support: firmware.chipSupport, filled: true)
+                            ChipSupportChip(support: device.chipSupport(sha256: firmware.sha256, product: firmware.product), filled: true)
                         }.padding(10)
                     }
 
@@ -82,7 +82,7 @@ struct FirmwareDetailView: View {
                         FactRow(label: "SHA-256", value: firmware.sha256, mono: true)
                         Divider().overlay(Theme.stroke)
                         FactRow(label: "Licence", value: firmware.licenseText)
-                        if let chip = ChipSupportChip.fact(firmware.chipSupport) {
+                        if let chip = ChipSupportChip.fact(device.chipSupport(sha256: firmware.sha256, product: firmware.product)) {
                             Divider().overlay(Theme.stroke)
                             FactRow(label: "Flash chip", value: chip)
                         }
@@ -125,7 +125,7 @@ struct FirmwareDetailView: View {
         let f = firmware
         prompt = InstallPrompt(title: "Put \(f.name) \(f.version) on your FM-1?",
                                message: (device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca or SLOOP firmware is backed up first when that setting is on. On a firmware built on SLOOP the app can't put it back.",
-                               confirm: "Install", verdict: device.chipVerdict(f.chipSupport)) { consent in device.install(f, consent: consent) }
+                               confirm: "Install", verdict: device.chipVerdict(device.chipSupport(sha256: f.sha256, product: f.product))) { consent in device.install(f, consent: consent) }
     }
 
     private var recentInstalls: some View {

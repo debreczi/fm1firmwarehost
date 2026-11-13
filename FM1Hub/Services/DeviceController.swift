@@ -328,25 +328,29 @@ final class DeviceController {
         if let id { unsafeChip = id == FlashChip.first ? nil : id }
     }
 
-    /// Which flash chips a package works on, by its SHA-256 alone: the catalogue's word for this very package, M-VAVE's
-    /// own firmware (the V15 or a file fetched from M-VAVE), or what the catalogue said of it when the app last read it
-    /// (kept in the app's own storage). What a backup's or record's files say, which can be edited, never decides it.
+    /// Which flash chips a package works on, by its SHA-256 alone: the catalogue's word for this very package when it
+    /// says one, M-VAVE's own firmware (the V15 or a file fetched from M-VAVE), or what the catalogue said of it when the
+    /// app last read it (kept in the app's own storage; a catalogue gone silent keeps "the first FM-1s only" there). What
+    /// a backup's or record's files say, which can be edited, never decides it.
     func chipSupport(sha256: String, product: String) -> ChipSupport {
-        if let f = catalog.firmwares.first(where: { $0.sha256 == sha256 }) { return f.chipSupport }
+        guard !sha256.isEmpty else { return .unknown }
+        if let f = catalog.firmwares.first(where: { $0.sha256 == sha256 }), f.chipSupport != .unknown { return f.chipSupport }
         if packages.isFetchedOfficial(sha256) { return .official }
         return packages.seenChip(sha256)
     }
 
     /// May M-VAVE's update loader write this package? By its hash: M-VAVE's own, or one the hub says is built on
     /// M-VAVE's code, now or when the app last read the catalogue. An older build the app never saw listed goes as
-    /// its family: when every firmware the catalogue lists with its identity is built on M-VAVE's code, or when it has
-    /// an M-VAVE number no community firmware in the catalogue reports. Never what a backup's files say.
-    private func usesStockLoader(_ pkg: FWSCPackage) -> Bool {
+    /// its family: when every firmware the catalogue lists with its identity is built on M-VAVE's code; then as the
+    /// firmware a backup names (`firmwareId`) is written, when the catalogue knows no firmware with that identity; then
+    /// as M-VAVE's own, for an M-VAVE number no community firmware in the catalogue reports.
+    private func usesStockLoader(_ pkg: FWSCPackage, firmwareId: String? = nil) -> Bool {
         if packages.isFetchedOfficial(pkg.sha256) { return true }
         if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { return f.usesStockLoader }
         if packages.seenStockLoader(pkg.sha256) { return true }
         let family = catalog.firmwares(reporting: pkg.product)
         if !family.isEmpty { return family.allSatisfy(\.usesStockLoader) }
+        if let id = firmwareId, let f = catalog.firmware(id: id) { return f.usesStockLoader }   // an older build whose identity has changed since
         return pkg.isOfficial && !catalog.firmwares.isEmpty
     }
 
@@ -1024,7 +1028,7 @@ final class DeviceController {
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
             if catalog.ownInstaller(of: s) != nil { throw FM1Error.package("\(s.firmwareName) is installed by its maker's own page: the package alone is not all of it.") }
             try await autoSnapshotIfWanted()
-            let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg),
+            let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg, firmwareId: s.firmwareId),
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot,
                                         consent: consent)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,

@@ -116,7 +116,7 @@ struct FirmwareListView: View {
 
     private func ask(_ f: Firmware) {
         prompt = InstallPrompt(title: "Put \(f.name) on your FM-1?", message: confirmMessage(f), confirm: "Install \(f.name) \(f.version)",
-                               verdict: device.chipVerdict(f.chipSupport)) { consent in device.install(f, consent: consent) }
+                               verdict: device.chipVerdict(device.chipSupport(sha256: f.sha256, product: f.product))) { consent in device.install(f, consent: consent) }
     }
 
     private func confirmMessage(_ f: Firmware) -> String {
