@@ -281,7 +281,7 @@ final class DeviceController {
                 append("identity \(dev.identity.text) on \(dev.portName)")
                 // the unit an unfinished update was written to, back after the app stopped waiting for it
                 let finishing = library.pending?.isFinished(by: dev.identity) == true
-                noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint, sameUnit: finishing)
+                noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint, carries: finishing)
                 musicBackupSupported = nil
                 reportedName = nil
                 reconcilePending(dev.identity)
@@ -330,15 +330,16 @@ final class DeviceController {
     /// What a device found just now said of its chip. A newer or unknown chip is also remembered (`unsafeChip`), with
     /// the unit that said it; the first FM-1s' chip, reported now by that same unit, puts it away; another unit's word
     /// never does. A device that says nothing, a loader too, leaves only that. `sameUnit`: the device that came back
-    /// after this app wrote to it, which is that unit wherever its port and name went.
-    private func noteFlash(_ id: UInt32?, port: String, endpoint: MIDIEndpointRef, sameUnit: Bool = false) {
+    /// after this app wrote to it, which is that unit wherever its port and name went. `carries`: likely the same unit
+    /// (it settles an unfinished update), so the reading moves to its port, but its word never takes it back.
+    private func noteFlash(_ id: UInt32?, port: String, endpoint: MIDIEndpointRef, sameUnit: Bool = false, carries: Bool = false) {
         if let id, flashChip != .reported(id) { append("flash chip \(FlashChip.hex(id))") }
         flashReport = DeviceFlash(id)
         reportPort = port
         let device = engine.device(of: endpoint)
         guard let id else {
             // the same unit, whatever its firmware calls its port now
-            if unsafeChip != nil, sameUnit || (device != 0 && device == unsafeDevice) { unsafeDevice = device; unsafePort = port }
+            if unsafeChip != nil, sameUnit || carries || (device != 0 && device == unsafeDevice) { unsafeDevice = device; unsafePort = port }
             return
         }
         if id != FlashChip.first {

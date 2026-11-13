@@ -329,7 +329,7 @@ final class FM1Updater {
             throw FM1Error.foreign("The FM-1 is in the update mode of another firmware (\(ota.identity.text)): finish that update with its own updater. If it is M-VAVE's update mode, Back to V15 can write M-VAVE's own firmware from it.")
         }
         let model = expectedProduct.split(separator: "_").first.map(String.init) ?? expectedProduct
-        if ota.identity.modelWithoutLoader != model {
+        if ota.identity.modelWithoutLoader.lowercased() != model.lowercased() {
             ota.link.close()
             throw FM1Error.model("The device in update mode is \(ota.identity.text), the package is for \(expectedProduct): nothing was written.")
         }
