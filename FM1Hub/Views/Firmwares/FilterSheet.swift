@@ -26,6 +26,12 @@ struct FilterSheet: View {
                         Text(g.id == "type" ? "Within a group any ticked one matches; between the groups all must." : "")
                     }
                 }
+                Section {
+                    Toggle(isOn: $settings.newerChipOnly) {
+                        Text("Works on newer FM-1s too")
+                        Text("Newer FM-1s, sold since autumn 2026, have another flash chip. The hub reads from each package whether it works on it.").font(.footnote)
+                    }
+                } header: { Text("Flash chip") }
                 Section("Show") {
                     Toggle("Betas", isOn: $settings.showBetas)
                     Toggle("Developer bases (a base to build on)", isOn: $settings.showDevOnly)
@@ -39,7 +45,7 @@ struct FilterSheet: View {
             .navigationTitle("Filter")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Clear") { settings.selectedKinds = [] } }
+                ToolbarItem(placement: .topBarLeading) { Button("Clear") { settings.selectedKinds = []; settings.newerChipOnly = false } }
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.fontWeight(.semibold) }
             }
         }

@@ -16,6 +16,13 @@ final class AppSettings {
     var gridView: Bool { didSet { d.set(gridView, forKey: "gridView") } }
     var selectedKinds: [String] { didSet { d.set(selectedKinds, forKey: "kinds") } }
     var disclaimerAccepted: Bool { didSet { if !Demo.isOn { d.set(disclaimerAccepted, forKey: "disclaimerAccepted") } } }
+    /// Settings › Allow installing on unsafe FM-1s. Off: a firmware the FM-1's reported flash chip can't take is refused;
+    /// on: the user is asked, as a dangerous install, every time. It matters only when the FM-1 reports its chip.
+    var allowUnsafeInstalls: Bool { didSet { d.set(allowUnsafeInstalls, forKey: "allowUnsafeInstalls") } }
+    /// The firmware list shows only those that work on newer FM-1s too (the hub's "Saves on newer FM-1s").
+    var newerChipOnly: Bool { didSet { d.set(newerChipOnly, forKey: "newerChipOnly") } }
+    /// The tab on show; not kept.
+    var tab: Int
 
     init() {
         showBetas = d.object(forKey: "showBetas") as? Bool ?? true
@@ -27,5 +34,8 @@ final class AppSettings {
         gridView = d.object(forKey: "gridView") as? Bool ?? false
         selectedKinds = d.stringArray(forKey: "kinds") ?? []
         disclaimerAccepted = Demo.isOn || d.bool(forKey: "disclaimerAccepted")   // no warning in the screenshots
+        allowUnsafeInstalls = d.bool(forKey: "allowUnsafeInstalls")
+        newerChipOnly = d.bool(forKey: "newerChipOnly")
+        tab = Demo.isOn ? Demo.tab : 0
     }
 }

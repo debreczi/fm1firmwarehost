@@ -4,11 +4,12 @@ struct RootView: View {
     @Environment(DeviceController.self) private var device
     @Environment(CatalogStore.self) private var catalog
     @Environment(AppSettings.self) private var settings
-    @State private var tab = Demo.isOn ? Demo.tab : 0
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var device = device
-        TabView(selection: $tab) {
+        @Bindable var settings = settings
+        TabView(selection: $settings.tab) {
             FirmwareListView()
                 .tabItem { Label("Firmwares", systemImage: "square.grid.2x2.fill") }
                 .tag(0)
@@ -25,7 +26,7 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(4)
         }
-        .fullScreenCover(isPresented: Binding(get: { !settings.disclaimerAccepted }, set: { _ in })) {
+        .fullScreenCover(isPresented: Binding(get: { !self.settings.disclaimerAccepted }, set: { _ in })) {
             DisclaimerView()
         }
         .sheet(isPresented: $device.showJobSheet) {
@@ -35,5 +36,6 @@ struct RootView: View {
                 .interactiveDismissDisabled(device.isBusy)
         }
         .task { await catalog.refresh() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { device.refreshOfficial() } }   // back after hours
     }
 }

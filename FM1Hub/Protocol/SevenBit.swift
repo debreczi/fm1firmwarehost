@@ -120,6 +120,14 @@ enum FM1Error: LocalizedError {
     case protocolError(String)
     case midi(String)
     case backup(String)
+    /// Step 1 never started: the running firmware asked for nothing.
+    case noRequests(String)
+    /// The flash chip check stopped the install before anything was sent.
+    case chipCheck(String)
+    /// Probably a newer FM-1 on a firmware for the first FM-1s: it can't update itself any more.
+    case stuck(String)
+    /// Another FM-1 answers too: the app writes to one at a time.
+    case several(String)
     case cancelled
 
     var code: String {
@@ -137,6 +145,10 @@ enum FM1Error: LocalizedError {
         case .protocolError: return "protocol"
         case .midi: return "midi"
         case .backup: return "backup"
+        case .noRequests: return "norequests"
+        case .chipCheck: return "chip"
+        case .stuck: return "stuck"
+        case .several: return "several"
         case .cancelled: return "cancelled"
         }
     }
@@ -144,7 +156,8 @@ enum FM1Error: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notFound(let s), .model(let s), .stopped(let s), .lost(let s), .noLoader(let s), .noReturn(let s),
-             .mismatch(let s), .badRequest(let s), .foreign(let s), .package(let s), .protocolError(let s), .midi(let s), .backup(let s):
+             .mismatch(let s), .badRequest(let s), .foreign(let s), .package(let s), .protocolError(let s), .midi(let s), .backup(let s),
+             .noRequests(let s), .chipCheck(let s), .stuck(let s), .several(let s):
             return s
         case .cancelled: return "Cancelled."
         }
@@ -155,8 +168,8 @@ enum FM1Error: LocalizedError {
     /// mid-write or cannot be told apart from one, so it counts as "the device may have been touched".
     var nothingWritten: Bool {
         switch self {
-        case .notFound, .model, .foreign, .package, .midi, .backup: return true
-        case .stopped, .lost, .noLoader, .noReturn, .mismatch, .badRequest, .protocolError, .cancelled: return false
+        case .notFound, .model, .foreign, .package, .midi, .backup, .chipCheck, .several: return true
+        case .stopped, .lost, .noLoader, .noReturn, .mismatch, .badRequest, .protocolError, .cancelled, .noRequests, .stuck: return false
         }
     }
 
@@ -166,8 +179,17 @@ enum FM1Error: LocalizedError {
         case .notFound: return "Plug the FM-1 in by USB, close other MIDI apps, then try again."
         case .noLoader: return "Still stuck? Hold OCT− while switching the FM-1 on, then press Install again."
         case .lost, .stopped: return "Replug the USB cable and press Install again: the device stays in update mode until it is finished."
+        case .noRequests: return "Replug the USB cable and press Install again."
         case .noReturn: return "Power-cycle the FM-1. If it does not start, hold OCT− while switching it on and install again."
-        case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup: return ""
+        case .stuck: return "A newer FM-1 stuck like this needs a computer: the hub's rescue page shows how. Otherwise, replug the USB cable and press Install again."
+        case .several: return "Unplug the other FM-1s, or disconnect this one's Bluetooth or other-app connection, then try again."
+        case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup, .chipCheck: return ""
         }
+    }
+
+    /// A page that helps with this failure.
+    var helpURL: URL? {
+        if case .stuck = self { return HubAPI.rescue }
+        return nil
     }
 }

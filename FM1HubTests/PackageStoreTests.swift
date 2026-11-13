@@ -47,6 +47,19 @@ final class PackageStoreTests: XCTestCase {
         XCTAssertNotEqual(store.newestCachedOfficial()?.product, "FM-1_007", "hawk-chua uses that number")
     }
 
+    /// Every package installed is kept, files and custom firmwares too: one above V15 that only looks official (SPAMPY is
+    /// FM-1_036, for the first FM-1s only) is never M-VAVE's own, offline or for the flash chip check.
+    func testAKeptPackageThatOnlyLooksOfficialIsNotMVAVEs() throws {
+        let store = PackageStore.shared
+        let custom = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_036", payload: 1024))
+        let u = try store.keep(custom)
+        defer { try? FileManager.default.removeItem(at: u) }
+        XCTAssertTrue(custom.isOfficial, "the number alone says official")
+        XCTAssertFalse(store.isFetchedOfficial(custom.sha256))
+        XCTAssertNotEqual(store.newestCachedOfficial()?.sha256, custom.sha256)
+        XCTAssertTrue(store.isFetchedOfficial(FWSCPackage.stockV15SHA256), "the hub's V15 is pinned by its hash")
+    }
+
     func testLocalPackageMatchesTheExactBuildWhenAHashIsGiven() throws {
         let store = PackageStore.shared
         let a = try FWSCPackage(data: FWSCPackageTests.makePackage(product: "FM-1_904", payload: 1024))

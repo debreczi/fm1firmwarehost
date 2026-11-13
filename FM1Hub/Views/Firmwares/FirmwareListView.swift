@@ -7,16 +7,28 @@ struct FirmwareListView: View {
     @Environment(LibraryStore.self) private var library
     @State private var query = ""
     @State private var showFilters = false
-    @State private var confirm: Firmware?
+    @State private var prompt: InstallPrompt?
     @State private var path: [Firmware] = []
 
     private var selected: Set<String> { Set(settings.selectedKinds) }
+
+    /// M-VAVE's own firmware comes first, unless a kind is picked (it is none) or the search is for something else.
+    /// The filter for newer FM-1s keeps it: it runs on both chips.
+    private var showOfficial: Bool { selected.isEmpty && OfficialFirmware.matches(query, latest: device.officialLatest) }
+
+    /// Would the search alone find catalogue firmwares that the filters hide? Then the empty list says so, under the
+    /// official card too.
+    private var filtersHideMatches: Bool {
+        let q = query.lowercased().split(separator: " ").map(String.init)
+        return catalog.firmwares.contains { f in q.allSatisfy { f.searchText.contains($0) } }
+    }
 
     private var filtered: [Firmware] {
         let q = query.lowercased().split(separator: " ").map(String.init)
         var list = catalog.firmwares.filter { f in
             if !settings.showBetas && f.beta && !f.isDevOnly { return false }
             if !settings.showDevOnly && f.isDevOnly { return false }
+            if settings.newerChipOnly && device.chipSupport(sha256: f.sha256, product: f.product) != .new { return false }
             for g in Kinds.groups {
                 let ticked = g.kinds.map(\.key).filter { selected.contains($0) }
                 if !ticked.isEmpty && !ticked.contains(where: { f.allKinds.contains($0) }) { return false }
@@ -43,11 +55,16 @@ struct FirmwareListView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     header
+                    if showOfficial { OfficialFirmwareCard { latest in prompt = .official(latest: latest, device: device) } }
                     if catalog.firmwares.isEmpty {
                         if catalog.loading { ProgressView("Loading the catalogue…").padding(40) }
                         else { EmptyState(icon: "wifi.exclamationmark", title: "No catalogue yet", text: catalog.error ?? "Pull to refresh.") }
                     } else if filtered.isEmpty {
-                        EmptyState(icon: "line.3.horizontal.decrease.circle", title: "Nothing matches", text: "Loosen the filters or the search.")
+                        // when the official card above is all the search finds, that is the answer
+                        if !showOfficial || filtersHideMatches {
+                            EmptyState(icon: "line.3.horizontal.decrease.circle", title: showOfficial ? "No other firmware matches" : "Nothing matches",
+                                       text: "Loosen the filters or the search.")
+                        }
                     } else if settings.gridView {
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                             ForEach(filtered) { f in
@@ -56,7 +73,7 @@ struct FirmwareListView: View {
                         }
                     } else {
                         ForEach(filtered) { f in
-                            FirmwareCard(firmware: f, installCount: library.installCount(firmwareId: f.id)) { confirm = f }
+                            FirmwareCard(firmware: f, installCount: library.installCount(firmwareId: f.id)) { ask(f) }
                         }
                     }
                     footer
@@ -66,7 +83,7 @@ struct FirmwareListView: View {
             }
             .hubBackground()
             .scrollContentBackground(.hidden)
-            .refreshable { await catalog.refresh(force: true) }
+            .refreshable { await device.refreshOfficial(force: true); await catalog.refresh(force: true) }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search name, maker, what it does")
             .navigationTitle("Firmwares")
             .navigationDestination(for: Firmware.self) { FirmwareDetailView(firmware: $0) }
@@ -85,25 +102,21 @@ struct FirmwareListView: View {
                         Toggle("Grid view", isOn: $settings.gridView)
                     } label: { Image(systemName: "arrow.up.arrow.down.circle") }
                     Button { showFilters = true } label: {
-                        Image(systemName: selected.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        Image(systemName: selected.isEmpty && !settings.newerChipOnly ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
             }
             .sheet(isPresented: $showFilters) {
                 FilterSheet().presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
-            .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible, presenting: confirm) { f in
-                Button("Install \(f.name) \(f.version)") { device.install(f) }
-                Button("Cancel", role: .cancel) {}
-            } message: { f in
-                Text(confirmMessage(f))
-            }
+            .installPrompt($prompt) { settings.newerChipOnly = true }
+            .onAppear { device.refreshOfficial() }   // the official card's version
         }
     }
 
-    private var confirmTitle: String {
-        if let f = confirm { return "Put \(f.name) on your FM-1?" }
-        return ""
+    private func ask(_ f: Firmware) {
+        prompt = InstallPrompt(title: "Put \(f.name) on your FM-1?", message: confirmMessage(f), confirm: "Install \(f.name) \(f.version)",
+                               verdict: device.chipVerdict(device.chipSupport(sha256: f.sha256, product: f.product))) { consent in device.install(f, consent: consent) }
     }
 
     private func confirmMessage(_ f: Firmware) -> String {
@@ -133,6 +146,13 @@ struct FirmwareListView: View {
                     }
                 }
                 .padding(.vertical, 2)
+            }
+            if settings.newerChipOnly {
+                Button { settings.newerChipOnly = false } label: {
+                    Label("Only firmwares that work on newer FM-1s too", systemImage: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.ok)
             }
             HStack {
                 Text("\(filtered.count) of \(catalog.firmwares.count) firmwares")

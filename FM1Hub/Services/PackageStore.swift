@@ -46,25 +46,96 @@ final class PackageStore {
 
     /// The current official firmware from M-VAVE's download server (V16 at the time of writing; whatever they publish next).
     /// `cachedOnly`: no network, the newest official package on the phone.
-    func officialLatest(cachedOnly: Bool = false, onProgress: ((Double) -> Void)? = nil) async throws -> FWSCPackage {
+    /// `commit`: keep the file and note its hash here; the version check does that itself (`commitOfficial`).
+    func officialLatest(cachedOnly: Bool = false, commit: Bool = true, onProgress: ((Double) -> Void)? = nil) async throws -> FWSCPackage {
         if cachedOnly {
             guard let p = newestCachedOfficial() else { throw FM1Error.package("No official firmware on this phone yet.") }
             return p
         }
         // M-VAVE publish no size for this one, so only the ceiling in download() and this floor bound it.
-        let data = try await download(HubAPI.officialLatest, expectedSize: 720_000, onProgress: onProgress)
+        let data = try await download(HubAPI.officialLatest, expectedSize: 720_000, sameHost: true, onProgress: onProgress)
         guard data.count > 200_000 else { throw FM1Error.package("M-VAVE's file is only \(data.count) bytes: not an FM-1 firmware.") }
         let p = try FWSCPackage(data: data)
         guard p.isOfficial else { throw FM1Error.package("M-VAVE's file is not an official FM-1 firmware (it reports \(p.product)).") }
-        try? keep(p)
+        if Task.isCancelled { throw FM1Error.cancelled }   // nothing kept for a check or install given up on
+        if commit { commitOfficial(p) }
         return p
     }
 
+    /// Keeps M-VAVE's file and records its hash as M-VAVE's own. The version check calls this on the main actor, after
+    /// its last look, so that Delete cache can't land between that look and the write.
+    func commitOfficial(_ p: FWSCPackage) {
+        try? keep(p)
+        noteOfficial(p.sha256)
+    }
+
+    private static let officialKey = "officialSHA256s"
+
+    /// Is this package one the app fetched from M-VAVE's download server (or the official V15)? Only those count as
+    /// M-VAVE's own: an official-looking number alone can be a custom firmware's (SPAMPY is FM-1_036).
+    func isFetchedOfficial(_ sha256: String) -> Bool {
+        sha256 == FWSCPackage.stockV15SHA256 || (UserDefaults.standard.stringArray(forKey: Self.officialKey) ?? []).contains(sha256)
+    }
+
+    private static let chipKey = "chipBySHA256"
+    private static let stockLoaderKey = "stockLoaderSHA256s"
+
+    /// The hub's word on each package, kept in the app's own storage whenever the app reads the catalogue, so it still
+    /// counts once the catalogue lists a newer version: which flash chips it works on, and whether it is built on
+    /// M-VAVE's code (and so written by M-VAVE's update loader). The latest word wins; silence, or a value the app
+    /// doesn't know, takes back only a claim that a package is safe on newer FM-1s, never "the first FM-1s only". A
+    /// backup's or record's files, which can be edited, never stand in for it. `onlyOld`: a catalogue from the phone's
+    /// cache, which may be older, only adds "the first FM-1s only".
+    func noteChips(_ firmwares: [Firmware], onlyOld: Bool = false) {
+        var all = UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String] ?? [:]
+        var changed = false
+        var stock = Set(UserDefaults.standard.stringArray(forKey: Self.stockLoaderKey) ?? [])
+        let stockBefore = stock
+        for f in firmwares where !f.sha256.isEmpty {
+            let c = f.chipSupport
+            if onlyOld {
+                if c == .old, all[f.sha256] != c.rawValue { all[f.sha256] = c.rawValue; changed = true }
+                continue
+            }
+            if c == .new || c == .any || c == .old {
+                if all[f.sha256] != c.rawValue { all[f.sha256] = c.rawValue; changed = true }
+            } else if let was = all[f.sha256], was != ChipSupport.old.rawValue {
+                all.removeValue(forKey: f.sha256)   // the hub no longer says it is safe
+                changed = true
+            }
+            if f.usesStockLoader { stock.insert(f.sha256) } else { stock.remove(f.sha256) }
+        }
+        if changed { UserDefaults.standard.set(all, forKey: Self.chipKey) }
+        if stock != stockBefore { UserDefaults.standard.set(Array(stock), forKey: Self.stockLoaderKey) }
+    }
+
+    /// Did the hub say, when the app last read it, that this package is built on M-VAVE's code?
+    func seenStockLoader(_ sha256: String) -> Bool {
+        (UserDefaults.standard.stringArray(forKey: Self.stockLoaderKey) ?? []).contains(sha256)
+    }
+
+    /// What the catalogue last said of this package when the app read it, or unknown.
+    func seenChip(_ sha256: String) -> ChipSupport {
+        guard let v = (UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String])?[sha256],
+              let c = ChipSupport(rawValue: v), c == .new || c == .any || c == .old else { return .unknown }
+        return c
+    }
+
+    private func noteOfficial(_ sha256: String) {
+        var all = UserDefaults.standard.stringArray(forKey: Self.officialKey) ?? []
+        guard !all.contains(sha256) else { return }
+        all.append(sha256)
+        UserDefaults.standard.set(all, forKey: Self.officialKey)
+    }
+
+    /// The newest official package on the phone: one fetched from M-VAVE, never another file that only looks official
+    /// (every package installed is kept here, files and custom firmwares too).
     func newestCachedOfficial() -> FWSCPackage? {
         var best: FWSCPackage?
         for u in cachedFiles() where u.lastPathComponent.hasPrefix("FM-1_0") {
             // below V15 such a number can be a custom firmware's: Bubba is FM-1_003
-            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial, p.product >= FWSCPackage.stockV15Product {
+            if let data = try? Data(contentsOf: u), let p = try? FWSCPackage(data: data), p.isOfficial, p.product >= FWSCPackage.stockV15Product,
+               isFetchedOfficial(p.sha256) {
                 if best == nil || p.product > best!.product { best = p }
             }
         }
@@ -196,8 +267,9 @@ final class PackageStore {
     /// Streams a package into memory under a hard ceiling. `exactSize` is the size the catalogue (or a GitHub
     /// release) states for this asset: when it is given, the body has to match it to the byte, before anything is
     /// parsed or kept. `expectedSize` is only the progress bar's estimate for when the server announces no length.
+    /// `sameHost`: the file must come from the host asked, over HTTPS, wherever a redirect points.
     private func download(_ url: URL, expectedSize: Int, exactSize: Int? = nil,
-                          maxBytes: Int = PackageStore.maxPackageBytes,
+                          maxBytes: Int = PackageStore.maxPackageBytes, sameHost: Bool = false,
                           onProgress: ((Double) -> Void)?) async throws -> Data {
         if let exact = exactSize, exact <= 0 || exact > maxBytes {
             throw FM1Error.package("This package is listed as \(exact) bytes, which cannot be an FM-1 package. Nothing was downloaded.")
@@ -209,6 +281,9 @@ final class PackageStore {
         let (bytes, resp) = try await URLSession.shared.bytes(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw FM1Error.package("The package could not be downloaded (HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)).")
+        }
+        if sameHost, http.url?.host != url.host || http.url?.scheme != "https" {
+            throw FM1Error.package("The download was sent on to another server (\(http.url?.host ?? "unknown")): nothing was kept.")
         }
         // what the server says it will send, refused before the first byte is kept
         let announced = http.expectedContentLength > 0 ? Int(http.expectedContentLength) : nil
@@ -246,7 +321,14 @@ final class PackageStore {
 
     func cacheSize() -> Int64 { Paths.size(of: Paths.packages) }
 
+    /// m-vave.com's last answer, which the device layer keeps: when, and which identity.
+    static let officialCheckedAtKey = "officialCheckedAt"
+    static let officialCheckedProductKey = "officialCheckedProduct"
+
     func clearCache() {
         for u in cachedFiles() { try? FileManager.default.removeItem(at: u) }
+        // that answer's file is gone with them: the next check must not be skipped
+        UserDefaults.standard.removeObject(forKey: Self.officialCheckedAtKey)
+        UserDefaults.standard.removeObject(forKey: Self.officialCheckedProductKey)
     }
 }

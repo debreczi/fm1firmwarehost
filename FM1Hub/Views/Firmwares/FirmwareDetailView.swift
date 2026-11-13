@@ -4,8 +4,10 @@ struct FirmwareDetailView: View {
     @Environment(DeviceController.self) private var device
     @Environment(LibraryStore.self) private var library
     @Environment(CatalogStore.self) private var catalog
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.dismiss) private var dismiss
     let firmware: Firmware
-    @State private var confirm = false
+    @State private var prompt: InstallPrompt?
     @State private var saving = false
     @State private var saveMessage = ""
 
@@ -21,6 +23,7 @@ struct FirmwareDetailView: View {
                         HStack(spacing: 6) {
                             if onDevice { Chip(text: "on your FM-1", icon: "checkmark", tint: Theme.ok, filled: true) }
                             if firmware.beta && !firmware.isDevOnly { Chip(text: "beta", tint: Theme.warn, filled: true) }
+                            ChipSupportChip(support: device.chipSupport(sha256: firmware.sha256, product: firmware.product), filled: true)
                         }.padding(10)
                     }
 
@@ -47,7 +50,7 @@ struct FirmwareDetailView: View {
                         Link(destination: u) { Label("Install with its own installer", systemImage: "arrow.up.right.square") }.buttonStyle(SecondaryButtonStyle())
                         Text("This firmware is installed by its maker's own page: the package alone is not all of it.").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
                     } else {
-                        Button { confirm = true } label: { Label(onDevice ? "Install again" : "Install on the FM-1", systemImage: "bolt.fill") }
+                        Button { ask() } label: { Label(onDevice ? "Install again" : "Install on the FM-1", systemImage: "bolt.fill") }
                             .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
                     }
                     Button { save() } label: {
@@ -79,6 +82,10 @@ struct FirmwareDetailView: View {
                         FactRow(label: "SHA-256", value: firmware.sha256, mono: true)
                         Divider().overlay(Theme.stroke)
                         FactRow(label: "Licence", value: firmware.licenseText)
+                        if let chip = ChipSupportChip.fact(device.chipSupport(sha256: firmware.sha256, product: firmware.product)) {
+                            Divider().overlay(Theme.stroke)
+                            FactRow(label: "Flash chip", value: chip)
+                        }
                         if firmware.usesStockLoader {
                             Divider().overlay(Theme.stroke)
                             FactRow(label: "Loader", value: "M-VAVE's own update loader (built on the official V15)")
@@ -111,12 +118,14 @@ struct FirmwareDetailView: View {
         .hubBackground()
         .navigationTitle(firmware.name)
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Put \(firmware.name) \(firmware.version) on your FM-1?", isPresented: $confirm, titleVisibility: .visible) {
-            Button("Install") { device.install(firmware) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text((device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca or SLOOP firmware is backed up first when that setting is on. On a firmware built on SLOOP the app can't put it back.")
-        }
+        .installPrompt($prompt) { settings.newerChipOnly = true; dismiss() }
+    }
+
+    private func ask() {
+        let f = firmware
+        prompt = InstallPrompt(title: "Put \(f.name) \(f.version) on your FM-1?",
+                               message: (device.whoIs.map { "It replaces \($0.firmware?.name ?? $0.name). " } ?? "") + "The new firmware may not read the old one's projects: a Felucca or SLOOP firmware is backed up first when that setting is on. On a firmware built on SLOOP the app can't put it back.",
+                               confirm: "Install", verdict: device.chipVerdict(device.chipSupport(sha256: f.sha256, product: f.product))) { consent in device.install(f, consent: consent) }
     }
 
     private var recentInstalls: some View {

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(LibraryStore.self) private var library
     @Environment(CatalogStore.self) private var catalog
+    @Environment(DeviceController.self) private var device
     @State private var cacheSize: Int64 = 0
     @State private var confirmClear = false
 
@@ -30,6 +31,14 @@ struct SettingsView: View {
                         .onDelete { idx in settings.chosenPorts.remove(atOffsets: idx) }
                     }
                 } header: { Text("MIDI") } footer: { Text("Port names you marked as your FM-1. Swipe to forget one.") }
+
+                Section {
+                    Toggle(isOn: $settings.allowUnsafeInstalls) {
+                        Text("Allow installing on unsafe FM-1s")
+                        Text("Matters only when your FM-1 reports a flash chip other than the first FM-1s'. Off: a firmware made for the first FM-1s is refused. On: you are asked first, every time, and it is still dangerous.").font(.footnote)
+                    }
+                    NavigationLink { FlashChipsView() } label: { Text("Flash chips: what the app checks") }
+                } header: { Text("Newer FM-1s") } footer: { Text("When the FM-1 doesn't report its chip, which is most of the time, a red warning comes before every firmware made for the first FM-1s only and every one the app can't place, whatever this switch says.") }
 
                 Section {
                     LabeledContent("Packages", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
@@ -62,7 +71,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear { cacheSize = PackageStore.shared.cacheSize() }
             .confirmationDialog("Delete the downloaded packages?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { PackageStore.shared.clearCache(); cacheSize = PackageStore.shared.cacheSize() }
+                Button("Delete", role: .destructive) { PackageStore.shared.clearCache(); device.forgetOfficialAnswer(); cacheSize = PackageStore.shared.cacheSize() }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Packages inside backups are kept. A firmware that is only in the cache can no longer be restored without the network.") }
         }

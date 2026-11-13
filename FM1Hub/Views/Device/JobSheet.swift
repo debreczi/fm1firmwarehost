@@ -28,6 +28,7 @@ struct JobSheet: View {
                         Image(systemName: j.success ? "checkmark.circle.fill" : "xmark.octagon.fill").font(.system(size: 48)).foregroundStyle(j.success ? Theme.ok : Theme.err)
                         Text(j.message).font(.system(size: 15)).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.9))
                         if !j.hint.isEmpty { Text(j.hint).font(.system(size: 13)).multilineTextAlignment(.center).foregroundStyle(Theme.textDim) }
+                        if let u = j.link { Link("Open the hub's rescue page", destination: u).font(.system(size: 14, weight: .semibold)) }
                     }
                     .padding(.vertical, 8)
                     Button("Done") { device.dismissJob() }.buttonStyle(PrimaryButtonStyle(tint: j.colour))
@@ -105,7 +106,7 @@ struct JobSheet: View {
             switch s {
             case .start(let id): return "The FM-1 (\(id)) is asked to start the update."
             case .verify(let n): return "Step 1: the running firmware reads the package header and stages the update loader (\(n) reads)."
-            case .loader: return "The FM-1 restarts into the update loader. Its screen may go dark for a moment."
+            case .loader: return "The FM-1 restarts into the update loader. Its screen may go dark for a moment. Keep only this FM-1 connected."
             case .write(let n): return "Step 2: the loader reads the whole image and writes it to flash (\(n) of about \(FM1Protocol.step2Reads) reads). Do not unplug."
             case .reboot: return "The FM-1 restarts with the new firmware."
             case .done(let id): return "Done: \(id)."

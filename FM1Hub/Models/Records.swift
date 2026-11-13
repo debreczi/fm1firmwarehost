@@ -76,6 +76,9 @@ struct PendingUpdate: Codable, Hashable {
     /// What the device reported just before the attempt, when the app knew. Reconciling a finished update later
     /// depends on it: see `isFinished(by:)`.
     var identityBefore: String?
+    /// Which flash chips the package works on (a ChipSupport), as known when the attempt began. Only "the first FM-1s
+    /// only" counts later, and only as a lower bound (see `DeviceController.chipSupport(of:)`).
+    var chip: String? = nil
 
     /// True when a device reporting this identity has already finished what this record was for, even if this app
     /// was not watching when it happened. Three things have to hold: the device is running the identity the record
@@ -85,9 +88,12 @@ struct PendingUpdate: Codable, Hashable {
     /// same identity and differ only by hash, so if the device already reported this identity beforehand — a
     /// re-install, or a rebuilt package of what is already on it — a later identity match says nothing about which
     /// build is running, and the exact record must stay. The same goes for not having known at all.
+    /// Only the very identity counts: a three-digit form could be its short form or another firmware's whole identity,
+    /// so the record stays (Connect asks for the whole identity, which settles it where the firmware answers). What it
+    /// ran before counts as the same firmware either way round, which keeps the record when in doubt too.
     func isFinished(by id: FM1Identity) -> Bool {
         guard let before = identityBefore else { return false }
-        return !id.isLoader && id.text == product && before != product
+        return !id.isLoader && id.text == product && !FM1Identity.same(before, product)
     }
 }
 
@@ -115,8 +121,11 @@ struct Snapshot: Codable, Identifiable, Hashable {
     var packageNote: String? = nil      // why there is no package, while there is none
     var archiveFirmware: String? = nil  // what the firmware said when a SLOOP archive was made, "FELUCCA SLOOP 2.8.4"
     var ownInstaller: String? = nil     // the page that installs this package's firmware, when the package alone can't
+    var chip: String? = nil             // which flash chips the package works on (a ChipSupport), as known when it was stored; only "old" counts later, as a lower bound
 
     var hasPackage: Bool { packageFile != nil }
+    /// Kept as text, so that a value a later version writes never makes the library unreadable here.
+    var chipSupport: ChipSupport? { chip.flatMap(ChipSupport.init(rawValue:)) }
     var hasArchive: Bool { archiveFile != nil }
     var hasSloopArchive: Bool { archiveFile == SloopArchive.fileName }
     /// Whether the app can write this backup's music back itself.

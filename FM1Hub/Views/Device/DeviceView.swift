@@ -6,11 +6,10 @@ struct DeviceView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(AppSettings.self) private var settings
     @State private var importing = false
-    @State private var confirmStock = false
-    @State private var confirmOfficialLatest = true
     @State private var askName = false
     @State private var snapshotName = ""
     @State private var showLog = false
+    @State private var prompt: InstallPrompt?
 
     var body: some View {
         NavigationStack {
@@ -29,17 +28,11 @@ struct DeviceView: View {
             .hubBackground()
             .navigationTitle("Your FM-1")
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .item], allowsMultipleSelection: false) { result in
-                if case .success(let urls) = result, let u = urls.first { device.installFile(u) }
+                // a moment after the picker has gone, so that what this shows next can be shown
+                if case .success(let urls) = result, let u = urls.first { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { askFile(u) } }
             }
-            .confirmationDialog(confirmOfficialLatest ? "Install M-VAVE's current firmware\(device.officialLatestVersion.map { " (\($0))" } ?? "")?" : "Back to the official V15?", isPresented: $confirmStock, titleVisibility: .visible) {
-                Button(confirmOfficialLatest ? "Install the latest official" : "Install V15") { device.installOfficial(latest: confirmOfficialLatest) }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(confirmOfficialLatest
-                     ? "The file M-VAVE publishes on m-vave.com, fetched now; its identity is read from the file before anything is written."
-                     : "M-VAVE's own FM-1 V15 as the hub serves it: the recovery image, checked byte for byte (SHA-256) before anything is written.")
-            }
-            .task { await device.checkOfficial() }
+            .installPrompt($prompt) { settings.newerChipOnly = true; settings.tab = 0 }
+            .onAppear { device.refreshOfficial() }
             .alert("Name this backup", isPresented: $askName) {
                 TextField("Name", text: $snapshotName)
                 Button("Save") { device.snapshot(name: snapshotName.isEmpty ? nil : snapshotName) }
@@ -48,6 +41,28 @@ struct DeviceView: View {
                 Text("Saves which firmware is on the FM-1 and its package; on Felucca and SLOOP firmwares, the music, settings, projects and samples too.")
             }
         }
+    }
+
+    /// A file is installed at once, as before, unless the flash chip check has something to say.
+    private func askFile(_ u: URL) {
+        guard let picked = device.pickedPackage(u) else { device.installFile(u); return }   // the install says what is wrong
+        let verdict = device.chipVerdict(picked.support)
+        if verdict == .install { device.installFile(u, expectedSHA256: picked.package.sha256); return }
+        let name = picked.firmware.map { "\($0.name) \($0.version)" } ?? u.lastPathComponent
+        prompt = InstallPrompt(title: "Install \(name) from the file?", message: "\(u.lastPathComponent), \(picked.package.product).",
+                               confirm: "Install", verdict: verdict) { consent in device.installFile(u, consent: consent, expectedSHA256: picked.package.sha256) }
+    }
+
+    private func askOfficial(latest: Bool) {
+        prompt = .official(latest: latest, device: device)
+    }
+
+    /// Resume starts at once, as before, unless the flash chip check has something to say about the package.
+    private func askResume(_ p: PendingUpdate) {
+        let verdict = device.chipVerdict(device.chipSupport(of: p))
+        if verdict == .install { device.resume(expected: p); return }
+        prompt = InstallPrompt(title: "Resume: \(p.name)?", message: "Writes the package that was being written again\(p.version.isEmpty ? "" : ": \(p.name) \(p.version)").",
+                               confirm: "Resume", verdict: verdict) { consent in device.resume(consent: consent, expected: p) }
     }
 
     private func versionLine(_ f: Firmware, exact: Bool, reports: String) -> String {
@@ -84,6 +99,10 @@ struct DeviceView: View {
                 }
                 Spacer(minLength: 0)
             }
+            if let chip = device.flashChip, device.isConnected {
+                Label("Flash chip: \(chip.summary)", systemImage: "memorychip")
+                    .font(.system(size: 12)).foregroundStyle(chip == .notReported ? Theme.textDim : chip == .reported(FlashChip.first) ? Theme.ok : Theme.warn)
+            }
             if let s = device.musicBackupSupported, device.isConnected {
                 Label(s ? (device.musicWritesBack ? "Answers the music backup protocol: Backup saves projects, presets and samples." : "Backup saves this firmware's music too, but the app can't put it back. Its own web editor may open the file.") : "No music backup the app knows: use this firmware's own backup tool for projects and presets.",
                       systemImage: s ? "checkmark.seal" : "info.circle")
@@ -115,7 +134,7 @@ struct DeviceView: View {
             if let p = library.pending {
                 Text("The update to \(p.name)\(p.version.isEmpty ? "" : " \(p.version)") was interrupted (\(device.loaderWaiting?.text ?? "")). Installing any firmware from the list continues from here. Or write that same package again:")
                     .font(.system(size: 13)).foregroundStyle(Theme.textDim)
-                Button { device.resume() } label: { Label("Resume: \(p.name)", systemImage: "arrow.clockwise") }
+                Button { askResume(p) } label: { Label("Resume: \(p.name)", systemImage: "arrow.clockwise") }
                     .buttonStyle(PrimaryButtonStyle(tint: Theme.warn)).disabled(device.isBusy)
             } else {
                 Text("An update was interrupted (\(device.loaderWaiting?.text ?? "")), but this app does not know which package was being written — it was another updater, or an older version of this app. Install any firmware from the list: that continues from here.")
@@ -143,11 +162,11 @@ struct DeviceView: View {
         VStack(alignment: .leading, spacing: 2) {
             SectionHeader(text: "Official firmware")
             VStack(spacing: 10) {
-                Button { confirmOfficialLatest = true; confirmStock = true } label: {
+                Button { askOfficial(latest: true) } label: {
                     Label(device.officialLatestVersion.map { "Install the latest official (\($0))" } ?? (device.officialChecking ? "Checking m-vave.com…" : "Install the latest official"), systemImage: "checkmark.seal")
                 }
                 .buttonStyle(PrimaryButtonStyle(tint: Color(hex: "#9aa4b2"))).disabled(device.isBusy)
-                Button { confirmOfficialLatest = false; confirmStock = true } label: { Label("Back to V15 (recovery image)", systemImage: "arrow.uturn.backward") }
+                Button { askOfficial(latest: false) } label: { Label("Back to V15 (recovery image)", systemImage: "arrow.uturn.backward") }
                     .buttonStyle(SecondaryButtonStyle()).disabled(device.isBusy)
                 Text("The latest comes straight from M-VAVE's download server, so a new official version shows up here without an app update. V15 is the known-good image the hub keeps for getting back to stock.")
                     .font(.system(size: 12)).foregroundStyle(Theme.textFaint)

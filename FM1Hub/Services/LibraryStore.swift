@@ -241,9 +241,11 @@ final class LibraryStore {
             let created = archive.flatMap { ISO8601DateFormatter().date(from: $0.created) }
                 ?? sloop.flatMap { ISO8601DateFormatter().date(from: $0.date) }
                 ?? (try? dir.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+            // M-VAVE's own only by its hash: an official-looking number alone can be a custom firmware's
+            let official = pkg.flatMap { PackageStore.shared.isFetchedOfficial($0.sha256) ? $0.officialVersion : nil }
             var s = Snapshot(name: "Recovered backup · \(identity)", identity: identity, firmwareId: nil,
-                             firmwareName: pkg?.officialVersion.map { _ in "Official firmware" } ?? sloopName ?? identity,
-                             version: pkg?.officialVersion, product: pkg?.product,
+                             firmwareName: official.map { _ in "Official firmware" } ?? sloopName ?? identity,
+                             version: official, product: pkg?.product,
                              packageFile: pkg != nil ? "package.fwsc" : nil, packageSHA256: pkg?.sha256, packageSize: pkg?.bytes.count,
                              // beside a SLOOP archive the identity comes from the package itself, so it proves nothing
                              packageExact: pkg?.product == identity && sloop == nil,

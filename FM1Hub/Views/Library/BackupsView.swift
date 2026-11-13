@@ -99,10 +99,11 @@ struct SnapshotDetailView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(DeviceController.self) private var device
     @Environment(CatalogStore.self) private var catalog
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @State var snapshot: Snapshot
     @State private var confirmDelete = false
-    @State private var confirmRestore = false
+    @State private var restorePrompt: InstallPrompt?
     @State private var confirmArchive = false
     @State private var editing = false
     @State private var newName = ""
@@ -110,6 +111,13 @@ struct SnapshotDetailView: View {
     /// The firmwares this backup's identity may belong to.
     private var sharing: [Firmware] { catalog.firmwares(reporting: snapshot.identity) }
     private var unconfirmed: Bool { catalog.packageIsUnconfirmed(in: snapshot) }
+
+    private func askRestore() {
+        let s = snapshot
+        restorePrompt = InstallPrompt(title: s.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(s.firmwareName) back on the FM-1?",
+                                      message: (unconfirmed ? "The app can't confirm this is the firmware that was on your FM-1. " : "") + "Installs the saved package." + (s.hasArchive && s.musicRestoresInApp ? " Restore the music archive afterwards, from this same backup." : ""),
+                                      confirm: "Restore the firmware", verdict: device.chipVerdict(device.chipSupport(of: s))) { consent in device.restoreFirmware(s, consent: consent) }
+    }
 
     private var musicFacts: String {
         guard snapshot.hasArchive else { return "none (this firmware has no backup over USB that the app knows)" }
@@ -138,7 +146,7 @@ struct SnapshotDetailView: View {
                         }
                         Text("\(snapshot.firmwareName) is installed by its maker's own page: the package alone is not all of it.").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
                     } else if snapshot.hasPackage {
-                        Button { confirmRestore = true } label: { Label("Restore the firmware", systemImage: "arrow.counterclockwise") }
+                        Button { askRestore() } label: { Label("Restore the firmware", systemImage: "arrow.counterclockwise") }
                             .buttonStyle(PrimaryButtonStyle(tint: c)).disabled(device.isBusy)
                         if unconfirmed {
                             Text("The app can't confirm that this package is the firmware that was on your FM-1: it only reports \(snapshot.identity), and other firmwares may use that number too.")
@@ -224,10 +232,7 @@ struct SnapshotDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog(snapshot.firmwareId == nil && unconfirmed ? "Put this package back on the FM-1?" : "Put \(snapshot.firmwareName) back on the FM-1?", isPresented: $confirmRestore, titleVisibility: .visible) {
-            Button("Restore the firmware") { device.restoreFirmware(snapshot) }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text((unconfirmed ? "The app can't confirm this is the firmware that was on your FM-1. " : "") + "Installs the saved package." + (snapshot.hasArchive && snapshot.musicRestoresInApp ? " Restore the music archive afterwards, from this same backup." : "")) }
+        .installPrompt($restorePrompt) { settings.newerChipOnly = true; settings.tab = 0 }
         .confirmationDialog("Write the music archive to the FM-1?", isPresented: $confirmArchive, titleVisibility: .visible) {
             Button("Restore the music", role: .destructive) { device.restoreArchive(snapshot) }
             Button("Cancel", role: .cancel) {}

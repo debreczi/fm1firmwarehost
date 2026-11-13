@@ -1,3 +1,4 @@
+import CoreMIDI
 import Foundation
 import Observation
 import SwiftUI
@@ -50,6 +51,8 @@ struct DeviceJob: Identifiable, Equatable {
     var success = false
     var message = ""
     var hint = ""
+    /// A page that helps with a failure.
+    var link: URL? = nil
 }
 
 /// The one place that talks to the FM-1: connect, install, snapshot, restore. Everything else observes it.
@@ -71,6 +74,24 @@ final class DeviceController {
     private(set) var midiPorts: [String] = []
     private(set) var loaderWaiting: FM1Identity?
     private(set) var musicBackupSupported: Bool?
+    /// What the FM-1 found last said about its flash chip, on which port: nil until one answered, and again once that
+    /// port is gone while nothing runs. Every handshake replaces it.
+    private(set) var flashReport: DeviceFlash?
+    private var reportPort: String?
+    /// A chip other than the first FM-1s' reported since the FM-1 was plugged in. It stays known while the firmware the
+    /// FM-1 runs afterwards says nothing, as most do. A first-FM-1 reading is never carried over like this: taken for
+    /// another unit's, it would hide a warning, where this one can only add one.
+    private var unsafeChip: UInt32?
+    /// The unit that reported it: its MIDI device (0: unknown) and port. Only that unit takes it back.
+    private var unsafeDevice: MIDIDeviceRef = 0
+    private var unsafePort: String?
+
+    /// What the flash chip check goes by.
+    var flashChip: DeviceFlash? {
+        if case .reported = flashReport { return flashReport }
+        if let id = unsafeChip { return .reported(id) }
+        return flashReport
+    }
     /// Can the app put the music it backs up back on this firmware? Not on one built on SLOOP.
     private(set) var musicWritesBack = true
     /// What the running firmware says of itself over the editor protocol, when it speaks it: "SLOOP 2.8.4".
@@ -78,6 +99,20 @@ final class DeviceController {
     /// M-VAVE's current official firmware, once checked: its identity ("FM-1_016") and whether it is on the phone.
     private(set) var officialLatest: String?
     private(set) var officialChecking = false
+    /// When m-vave.com last answered, kept across launches (its file is kept too), and when the app last asked it.
+    private var officialCheckedAt: Date? {
+        get { UserDefaults.standard.object(forKey: PackageStore.officialCheckedAtKey) as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: PackageStore.officialCheckedAtKey) }
+    }
+    /// What it answered then ("FM-1_016"): the time counts only while the version shown is that answer.
+    private var officialCheckedProduct: String? {
+        get { UserDefaults.standard.string(forKey: PackageStore.officialCheckedProductKey) }
+        set { UserDefaults.standard.set(newValue, forKey: PackageStore.officialCheckedProductKey) }
+    }
+    private var officialTriedAt: Date?
+    private var officialTask: Task<Void, Never>?
+    /// Counts Delete cache: an m-vave.com answer from before one is not taken.
+    private var officialRun = 0
     var statusMessage: String = ""
     var showJobSheet = false
 
@@ -92,7 +127,7 @@ final class DeviceController {
             Task { @MainActor in self?.setupChanged() }
         }
         refreshPorts()
-        officialLatest = packages.newestCachedOfficial()?.product
+        officialLatest = keptOfficial()
     }
 
     var whoIs: WhoIs? { catalog.whoIs(identity?.text, named: reportedName) }
@@ -111,6 +146,7 @@ final class DeviceController {
         let u = FM1Updater(engine: engine)
         u.probeAll = settings.probeAllPorts
         u.chosenPorts = Set(settings.chosenPorts)
+        u.plainOnly = Set(catalog.firmwares.filter(\.usesStockLoader).map(\.product))
         u.log = { [weak self] s in Task { @MainActor in self?.append(s) } }
         updater = u
         return u
@@ -146,11 +182,20 @@ final class DeviceController {
     private func setupChanged() {
         if Demo.isOn { return }
         refreshPorts()
+        // an FM-1 unplugged while nothing runs takes what it said with it; an install's own restarts don't
+        if !isBusy, let p = reportPort, !midiPorts.contains(p) {
+            flashReport = nil
+            reportPort = nil
+        }
+        // the unit that reported a newer chip is gone, and no update is unfinished: the next FM-1 may be another one,
+        // other MIDI gear still plugged in or not; while an update is unfinished this is the unit it was for
+        if !isBusy, let p = unsafePort, !midiPorts.contains(p), !unsafeUnitOnline(), library.pending == nil { forgetUnsafe() }
         if midiPorts.isEmpty, !isBusy {
             identity = nil
             musicBackupSupported = nil
             reportedName = nil
             loaderWaiting = nil          // unplugged: the Resume card must not keep claiming a loader is waiting
+            if library.pending == nil { forgetUnsafe() }   // the next FM-1 may have another chip; an unfinished update's stays
             statusMessage = "No MIDI device."
         }
     }
@@ -160,15 +205,61 @@ final class DeviceController {
         otherPorts.removeAll { $0 == name }
     }
 
+    /// Asks m-vave.com which official version is current, in a task of its own that no screen cancels when it goes
+    /// away, so the tabs share one download. Without `force` it asks only when the last answer is some hours old, or ten
+    /// minutes after a try that failed (offline, or a file the app didn't accept); pull to refresh forces it. None
+    /// starts while the FM-1 is busy.
+    func refreshOfficial(force: Bool = false) {
+        guard officialTask == nil, !isBusy, !Demo.isOn else { return }
+        let now = Date()
+        if !force {
+            if let l = officialLatest, l == officialCheckedProduct, let t = officialCheckedAt, t <= now, now.timeIntervalSince(t) < 6 * 3600 { return }
+            if let t = officialTriedAt, t <= now, now.timeIntervalSince(t) < 600 { return }
+        }
+        officialTriedAt = now
+        let run = officialRun
+        officialTask = Task { [weak self] in
+            await self?.checkOfficial()
+            if self?.officialRun == run { self?.officialTask = nil }
+        }
+    }
+
     /// Asks M-VAVE's server which official version is current (and keeps the file). Quiet when offline.
     func checkOfficial() async {
         guard !officialChecking, !Demo.isOn else { return }
         officialChecking = true
         defer { officialChecking = false }
-        if let p = try? await packages.officialLatest() {
-            officialLatest = p.product
+        let run = officialRun
+        // the file is kept here, on the main actor, after the last look: Delete cache can't land in between
+        if let p = try? await packages.officialLatest(commit: false), run == officialRun {   // not one Delete cache has overtaken
+            packages.commitOfficial(p)
+            noteOfficialAnswer(p)
             append("official firmware on m-vave.com: \(p.product)")
         }
+    }
+
+    /// What the app shows as M-VAVE's latest before asking: m-vave.com's last answer, else the newest file it once
+    /// answered with that is on the phone. The hub's V15 is not M-VAVE's latest.
+    private func keptOfficial() -> String? {
+        officialCheckedProduct ?? packages.newestCachedOfficial().flatMap { $0.isStockV15 ? nil : $0.product }
+    }
+
+    /// The phone's packages were deleted: m-vave.com's last answer goes with them (the package store forgets it too).
+    func forgetOfficialAnswer() {
+        officialTask?.cancel()           // a check on its way would bring back what was deleted
+        officialTask = nil
+        officialRun += 1
+        officialLatest = keptOfficial()
+        officialTriedAt = nil
+    }
+
+    /// m-vave.com answered with this file, whoever asked: it is the version shown as M-VAVE's latest, and the time
+    /// before the next check counts from now.
+    private func noteOfficialAnswer(_ p: FWSCPackage) {
+        officialLatest = p.product
+        officialCheckedAt = Date()
+        officialCheckedProduct = p.product
+        officialTriedAt = nil
     }
 
     // MARK: Connect
@@ -188,6 +279,9 @@ final class DeviceController {
                 otherPorts = []
                 statusMessage = ""
                 append("identity \(dev.identity.text) on \(dev.portName)")
+                // the unit an unfinished update was written to, back after the app stopped waiting for it
+                let finishing = library.pending?.isFinished(by: dev.identity) == true
+                noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint, carries: finishing)
                 musicBackupSupported = nil
                 reportedName = nil
                 reconcilePending(dev.identity)
@@ -197,6 +291,8 @@ final class DeviceController {
                 musicBackupSupported = nil
                 reportedName = nil
                 loaderWaiting = nil          // nothing answered: there is no loader to show a Resume card for
+                flashReport = nil            // a newer chip stays known: an FM-1 still plugged in may just be busy
+                reportPort = nil
                 otherPorts = up.others()
                 statusMessage = "No FM-1 found" + up.seen() + ". Plug it in by USB, close other MIDI apps, try again."
                 append("no FM-1" + up.seen())
@@ -224,7 +320,99 @@ final class DeviceController {
 
     private func openDevice() async -> FM1Device? {
         let up = updater ?? makeUpdater()
-        return await up.find { !$0.isLoader }
+        let dev = await up.find { !$0.isLoader }
+        if let dev { noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint) }
+        return dev
+    }
+
+    // MARK: Flash chips
+
+    /// What a device found just now said of its chip. A newer or unknown chip is also remembered (`unsafeChip`), with
+    /// the unit that said it; the first FM-1s' chip, reported now by that same unit, puts it away; another unit's word
+    /// never does. A device that says nothing, a loader too, leaves only that. `sameUnit`: the device that came back
+    /// after this app wrote to it, which is that unit wherever its port and name went. `carries`: likely the same unit
+    /// (it settles an unfinished update), so the reading moves to its port, but its word never takes it back.
+    private func noteFlash(_ id: UInt32?, port: String, endpoint: MIDIEndpointRef, sameUnit: Bool = false, carries: Bool = false) {
+        if let id, flashChip != .reported(id) { append("flash chip \(FlashChip.hex(id))") }
+        flashReport = DeviceFlash(id)
+        reportPort = port
+        let device = engine.device(of: endpoint)
+        guard let id else {
+            // the same unit, whatever its firmware calls its port now
+            if unsafeChip != nil, sameUnit || carries || (device != 0 && device == unsafeDevice) { unsafeDevice = device; unsafePort = port }
+            return
+        }
+        if id != FlashChip.first {
+            unsafeChip = id
+            unsafeDevice = device
+            unsafePort = port
+        } else if unsafeChip != nil, sameUnit || (device != 0 && device == unsafeDevice) {
+            forgetUnsafe()
+        }
+    }
+
+    /// Is the unit that reported the newer chip still here, under any port name?
+    private func unsafeUnitOnline() -> Bool {
+        unsafeDevice != 0 && engine.sources().contains { engine.device(of: $0.endpoint) == unsafeDevice }
+    }
+
+    private func forgetUnsafe() {
+        unsafeChip = nil
+        unsafeDevice = 0
+        unsafePort = nil
+    }
+
+    /// Which flash chips a package works on, by its SHA-256 alone: the catalogue's word for this very package when it
+    /// says one, M-VAVE's own firmware (the V15 or a file fetched from M-VAVE), or what the catalogue said of it when the
+    /// app last read it (kept in the app's own storage; a catalogue gone silent keeps "the first FM-1s only" there). What
+    /// a backup's or record's files say, which can be edited, never decides it.
+    func chipSupport(sha256: String, product: String) -> ChipSupport {
+        guard !sha256.isEmpty else { return .unknown }
+        if let f = catalog.firmwares.first(where: { $0.sha256 == sha256 }), f.chipSupport != .unknown {
+            // a catalogue read from the phone's cache can be older than the hub's last word: "the first FM-1s only" stands
+            if f.chipSupport != .old, packages.seenChip(sha256) == .old { return .old }
+            return f.chipSupport
+        }
+        if packages.isFetchedOfficial(sha256) { return .official }
+        return packages.seenChip(sha256)
+    }
+
+    /// May M-VAVE's update loader write this package? By its hash alone: M-VAVE's own, or one the hub says is built on
+    /// M-VAVE's code, now or when the app last read the catalogue. Never by its number, its family or what a backup or
+    /// record says. A package that doesn't qualify is not written from M-VAVE's update mode; Back to V15 always is.
+    private func usesStockLoader(_ pkg: FWSCPackage) -> Bool {
+        if packages.isFetchedOfficial(pkg.sha256) { return true }
+        if let f = catalog.firmwares.first(where: { $0.sha256 == pkg.sha256 }) { return f.usesStockLoader }
+        return packages.seenStockLoader(pkg.sha256)
+    }
+
+    func chipSupport(of s: Snapshot) -> ChipSupport {
+        Self.atLeastOld(chipSupport(sha256: s.packageSHA256 ?? "", product: s.product ?? s.identity), remembered: s.chipSupport)
+    }
+
+    func chipSupport(of p: PendingUpdate) -> ChipSupport {
+        Self.atLeastOld(chipSupport(sha256: p.sha256, product: p.product), remembered: p.chip.flatMap(ChipSupport.init(rawValue:)))
+    }
+
+    /// A record's own "the first FM-1s only" counts where the app knows nothing else: it can only make the check
+    /// stricter, so an edited file gains nothing by it. Nothing else a record says counts.
+    private static func atLeastOld(_ c: ChipSupport, remembered: ChipSupport?) -> ChipSupport {
+        c == .unknown && remembered == .old ? .old : c
+    }
+
+    /// What the flash chip check says now about installing a package with this support.
+    func chipVerdict(_ support: ChipSupport) -> ChipVerdict {
+        ChipGuard.verdict(device: flashChip ?? .notReported, package: support, allowUnsafe: settings.allowUnsafeInstalls)
+    }
+
+    /// Can an update this firmware never started be a newer FM-1 stuck on a firmware that doesn't know its chip? Not when
+    /// the FM-1 reported the first chip, and not when the running version is known to work on newer FM-1s: M-VAVE's own,
+    /// or one the device named exactly and the hub says works on them.
+    private func mayBeStuck(_ id: FM1Identity) -> Bool {
+        guard !id.isLoader, flashChip?.id != FlashChip.first else { return false }
+        if FWSCPackage.isOfficialProduct(id.text), catalog.firmwares(reporting: id.text).isEmpty { return false }
+        guard let f = Firmware.named(reportedName, among: catalog.firmwares(reporting: id.text)), f.product == id.text else { return true }
+        return f.chipSupport == .old || f.chipSupport == .unknown
     }
 
     func cancel() {
@@ -234,7 +422,9 @@ final class DeviceController {
 
     // MARK: Install
 
-    func install(_ f: Firmware) {
+    /// `consent`: what the user agreed to when the flash chip check asked (`chipVerdict`). It is checked again against
+    /// the device itself before anything is written.
+    func install(_ f: Firmware, consent: ChipVerdict = .install) {
         guard !isBusy else { return }
         var j = DeviceJob(kind: .install, title: f.name, subtitle: "\(f.version) · by \(f.author)", colour: Look.colour(for: f.id), imageURL: f.imageURL)
         start(job: j) { [self] in
@@ -243,7 +433,8 @@ final class DeviceController {
             phase = .downloading(0)
             let pkg = try await packages.package(for: f) { p in Task { @MainActor in self.phase = .downloading(p) } }
             let after = try await flash(pkg, product: f.product, stockLoader: f.usesStockLoader,
-                                        name: f.name, version: f.version, firmwareId: f.id, source: .hub)
+                                        name: f.name, version: f.version, firmwareId: f.id, source: .hub,
+                                        consent: consent)
             library.add(InstallRecord(firmwareId: f.id, name: f.name, version: f.version, product: f.product, sha256: f.sha256,
                                       identityBefore: before, identityAfter: after, source: .hub, success: true))
             j.message = "\(f.name) \(f.version) is on your FM-1."
@@ -255,7 +446,8 @@ final class DeviceController {
     }
 
     /// M-VAVE's own firmware: the current one from their server (`latest`), or the V15 recovery image from the hub.
-    func installOfficial(latest: Bool) {
+    /// `shown`: the identity the question named ("FM-1_016"), so the result can say when M-VAVE's file has changed since.
+    func installOfficial(latest: Bool, shown: String? = nil, consent: ChipVerdict = .install) {
         guard !isBusy else { return }
         let title = latest ? "Official firmware" : "Official firmware V15"
         var j = DeviceJob(kind: .official, title: title, subtitle: latest ? "M-VAVE's current release" : "M-VAVE's recovery image, from the hub", colour: Color(hex: "#9aa4b2"), imageURL: nil)
@@ -265,25 +457,40 @@ final class DeviceController {
             try await autoSnapshotIfWanted()
             phase = .downloading(0)
             let pkg: FWSCPackage
+            var fromPhone = false
             if latest {
                 do {
                     pkg = try await packages.officialLatest { p in Task { @MainActor in self.phase = .downloading(p) } }
                 } catch {
-                    guard let cached = try? await packages.officialLatest(cachedOnly: true) else { throw error }
-                    append("m-vave.com unreachable, using the cached \(cached.product)")
+                    if Task.isCancelled { throw FM1Error.cancelled }   // Cancel, not "m-vave.com can't be reached"
+                    // the hub's V15 is not M-VAVE's latest: "Back to V15" is the way to that one
+                    guard let cached = try? await packages.officialLatest(cachedOnly: true), !cached.isStockV15 else {
+                        throw FM1Error.package("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), and no copy of it is on this phone. Try again online, or use Back to V15 for the recovery image.")
+                    }
+                    append("m-vave.com's file couldn't be fetched or wasn't accepted (\(error.localizedDescription)), using the cached \(cached.product)")
                     pkg = cached
+                    fromPhone = true
+                    j.subtitle = "M-VAVE's release, the copy on this phone"
+                    job?.subtitle = j.subtitle            // the sheet shows it now, whatever comes next
                 }
-                officialLatest = pkg.product
+                if !fromPhone { noteOfficialAnswer(pkg) }   // the phone's copy says nothing of what M-VAVE publishes
             } else {
                 pkg = try await packages.stockPackage(catalog.stock) { p in Task { @MainActor in self.phase = .downloading(p) } }
             }
             product = pkg.product
             j.title = "Official firmware \(pkg.officialVersion ?? pkg.product)"
             let after = try await flash(pkg, product: pkg.product, stockLoader: true,
-                                        name: "Official firmware", version: pkg.officialVersion ?? "", firmwareId: nil, source: .stock)
+                                        name: "Official firmware", version: pkg.officialVersion ?? "", firmwareId: nil, source: .stock,
+                                        consent: consent)
             library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: pkg.officialVersion ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .stock, success: true))
             j.message = "The official \(pkg.officialVersion ?? pkg.product) is on your FM-1."
+            if fromPhone {
+                j.message += " m-vave.com's file couldn't be fetched or wasn't accepted, so the copy on this phone was used."
+                if let s = shown, s != pkg.product, let v = FWSCPackage.officialVersion(of: s) { j.message += " The app had shown \(v)." }
+            } else if latest, let s = shown, s != pkg.product, let v = FWSCPackage.officialVersion(of: s) {
+                j.message += " The app had shown \(v): M-VAVE's file has changed since."
+            }
             return j
         } onFailure: { [self] e in
             library.add(InstallRecord(firmwareId: nil, name: "Official firmware", version: FWSCPackage.officialVersion(of: product) ?? "", product: product, sha256: nil,
@@ -291,8 +498,18 @@ final class DeviceController {
         }
     }
 
+    /// A package file read for the flash chip check before it is installed: nil when it can't be read (the install
+    /// then says why, and the history keeps it).
+    func pickedPackage(_ url: URL) -> (package: FWSCPackage, firmware: Firmware?, support: ChipSupport)? {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let pkg = try? FWSCPackage(data: data), pkg.product.hasPrefix("FM-1_") else { return nil }
+        return (pkg, catalog.firmwares.first { $0.sha256 == pkg.sha256 }, chipSupport(sha256: pkg.sha256, product: pkg.product))
+    }
+
     /// A package chosen in the Files app (the last resort: a release the app could not find on its own).
-    func installFile(_ url: URL) {
+    /// `expectedSHA256`: the file the question was about; one that has changed since is not written.
+    func installFile(_ url: URL, consent: ChipVerdict = .install, expectedSHA256: String? = nil) {
         guard !isBusy else { return }
         var j = DeviceJob(kind: .file, title: url.lastPathComponent, subtitle: "Package from a file", colour: Color(hex: "#9aa4b2"), imageURL: nil)
         start(job: j) { [self] in
@@ -302,6 +519,9 @@ final class DeviceController {
             let data = try Data(contentsOf: url)
             let pkg = try FWSCPackage(data: data)
             guard pkg.product.hasPrefix("FM-1_") else { throw FM1Error.package("The file is for \(pkg.product), not for an FM-1.") }
+            if let e = expectedSHA256, e != pkg.sha256 {
+                throw FM1Error.package("The file changed after you were asked about it: nothing was written. Pick it again.")
+            }
             try? packages.keep(pkg)
             let who = catalog.whoIs(pkg.product)
             let known = catalog.firmwares.first { $0.sha256 == pkg.sha256 }
@@ -309,8 +529,9 @@ final class DeviceController {
             j.subtitle = known.map { "\($0.version) · \(url.lastPathComponent)" } ?? url.lastPathComponent
             if let k = known { j.colour = Look.colour(for: k.id); j.imageURL = k.imageURL }
             try await autoSnapshotIfWanted()
-            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || known?.usesStockLoader == true,
-                                        name: j.title, version: known?.version ?? "", firmwareId: known?.id, source: .file)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg),
+                                        name: j.title, version: known?.version ?? "", firmwareId: known?.id, source: .file,
+                                        consent: consent)
             library.add(InstallRecord(firmwareId: known?.id, name: j.title, version: known?.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .file, success: true))
             j.message = "\(j.title) is on your FM-1."
@@ -323,21 +544,32 @@ final class DeviceController {
 
     /// The device is in update mode (an interrupted update): write the package that was being written again — that
     /// very one, resolved by its SHA-256, never whatever was installed successfully last.
-    func resume() {
+    /// `expected`: the record the question was about; if another has taken its place since, nothing is written.
+    func resume(consent: ChipVerdict = .install, expected: PendingUpdate? = nil) {
         guard !isBusy, let pending = library.pending else { return }
         let f = pending.firmwareId.flatMap { catalog.firmware(id: $0) }
         var j = DeviceJob(kind: .resume, title: "Resume: \(pending.name)", subtitle: pending.version, colour: f.map { Look.colour(for: $0.id) } ?? Color(hex: "#9aa4b2"), imageURL: f?.imageURL)
         start(job: j) { [self] in
+            if let e = expected, e.sha256 != pending.sha256 || e.product != pending.product {
+                throw FM1Error.package("The interrupted update changed after you were asked about it: nothing was written. Press Resume again to decide.")
+            }
             phase = .downloading(0)
             let pkg = try await pendingPackage(pending, firmware: f)
             if Task.isCancelled { throw FM1Error.cancelled }   // the updater made here knows nothing of an earlier Cancel
             let up = makeUpdater()
+            defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port, endpoint: b.endpoint, sameUnit: true) } }   // whatever the outcome
             // The record already exists; this writes back the loader identity this attempt found, so that if the
             // record was made without knowing what the device was running, a later Connect can still settle it.
-            let outcome = try await up.resume(image: pkg.logicalImage, expectedProduct: pending.product, stockLoader: pending.usesStockLoader,
+            let outcome = try await up.resume(image: pkg.logicalImage, expectedProduct: pending.product, stockLoader: usesStockLoader(pkg),
                                               beforeWriting: { [self] found in
+                                                  noteFlash(found.flashID, port: found.portName, endpoint: found.endpoint)
+                                                  let now = chipVerdict(chipSupport(of: pending))
+                                                  guard ChipGuard.allows(now, consent: consent) else {
+                                                      append("flash chip check: \(flashChip?.summary ?? "not reported"), resume: nothing written")
+                                                      throw FM1Error.chipCheck(ChipGuard.stopText(now))
+                                                  }
                                                   var p = pending
-                                                  p.identityBefore = found.text
+                                                  p.identityBefore = found.identity.text
                                                   try library.refreshPending(p)
                                               },
                                               onStep: { s in Task { @MainActor in self.phase = .installing(s) } })
@@ -377,12 +609,17 @@ final class DeviceController {
     /// Running firmware -> loader -> new firmware, or straight from a waiting loader. Returns the identity reported
     /// after. What is about to be written is recorded before the loader is entered, so an interruption can be
     /// resumed with this exact package; the record is cleared only once the device has reported the new identity.
+    ///
+    /// The flash chip check runs again at the point of no return, with what the device found there reported: a chip
+    /// learnt only then, which what the user agreed to (`consent`) does not cover, stops the install with nothing written.
     private func flash(_ pkg: FWSCPackage, product: String, stockLoader: Bool,
-                       name: String, version: String, firmwareId: String?, source: InstallSource) async throws -> String {
+                       name: String, version: String, firmwareId: String?, source: InstallSource,
+                       consent: ChipVerdict, remembered: ChipSupport? = nil) async throws -> String {
         // Cancel reaches the updater of the moment, and the updater made here starts afresh: one pressed before now, or
         // while the loader is asked for below, is only remembered by the task.
         if Task.isCancelled { throw FM1Error.cancelled }
         let up = makeUpdater()
+        defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port, endpoint: b.endpoint, sameUnit: true) } }   // whatever the outcome
         let image = pkg.logicalImage
         try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
         // The record is written by this hook, which the updater calls once it has found the device and checked its
@@ -392,14 +629,25 @@ final class DeviceController {
         // The token the hook brings back is this job's own. Without it nothing is abandoned, so a job that fails
         // before the hook ever runs cannot undo the recovery record of an earlier write that did go half-way.
         var token: LibraryStore.AttemptToken?
-        let record: FM1Updater.BeforeWriting = { [self] found in
+        var stuckSuspect = false
+        let record: FM1Updater.BeforeWriting = { [self] dev in
+            let found = dev.identity
+            noteFlash(dev.flashID, port: dev.portName, endpoint: dev.endpoint)
+            // the catalogue of this moment, for this very file; a backup's "the first FM-1s only" as for its question
+            let support = Self.atLeastOld(chipSupport(sha256: pkg.sha256, product: pkg.product), remembered: remembered)
+            let now = chipVerdict(support)
+            guard ChipGuard.allows(now, consent: consent) else {
+                append("flash chip check: \(flashChip?.summary ?? "not reported"), package \(support.rawValue): nothing written")
+                throw FM1Error.chipCheck(ChipGuard.stopText(now))
+            }
+            stuckSuspect = mayBeStuck(found)
             // whatever this leaves on the FM-1, it is no longer known to be what answered before
             reportedName = nil
             musicBackupSupported = nil
             musicWritesBack = true
             token = try library.beginAttempt(PendingUpdate(product: pkg.product, sha256: pkg.sha256, firmwareId: firmwareId,
                                                            name: name, version: version, usesStockLoader: stockLoader,
-                                                           source: source, identityBefore: found.text))
+                                                           source: source, identityBefore: found.text, chip: support.rawValue))
         }
         let after: String
         do {
@@ -427,6 +675,9 @@ final class DeviceController {
             // if the point of no return ever moves. The store knows what the attempt supplanted, which is why it
             // and not this is asked to put it back.
             if (error as? FM1Error)?.nothingWritten == true { putBack(token) }
+            if case .noRequests(let m)? = error as? FM1Error, stuckSuspect {
+                throw FM1Error.stuck(m + " If your FM-1 is a newer one (M-VAVE logo under the screen), the firmware on it may not work with its flash chip: then it can't start an update, and holding OCT− won't help.")
+            }
             throw error
         }
         forgetPending()
@@ -495,6 +746,7 @@ final class DeviceController {
                 let fe = error as? FM1Error
                 j.message = (fe.map { "\($0.code): " } ?? "") + error.localizedDescription
                 j.hint = fe?.hint ?? ""
+                j.link = fe?.helpURL
                 if fe?.code == "notfound" { otherPorts = updater?.others() ?? [] }
                 append("error: \(j.message)")
                 onFailure(error)
@@ -666,7 +918,7 @@ final class DeviceController {
                 s.firmwareName = f.name
                 s.version = f.versionSaid(in: reportedName)
                 s.packageExact = !ambiguous
-            } else if from == "phone" || from == "GitHub release", !pkg.isOfficial, who?.exact != true || pkg.sha256 != who?.firmware?.sha256 {
+            } else if from == "phone" || from == "GitHub release", !packages.isFetchedOfficial(pkg.sha256), who?.exact != true || pkg.sha256 != who?.firmware?.sha256 {
                 // found by its identity alone, on the phone or among the makers' releases: nothing ties it to this FM-1
                 s.packageExact = false
                 if !catalog.firmwares.contains(where: { $0.sha256 == pkg.sha256 }) { s.version = nil }
@@ -717,7 +969,10 @@ final class DeviceController {
         if FWSCPackage.isOfficialProduct(identity) {
             if identity == FWSCPackage.stockV15Product, let p = try? await packages.stockPackage(catalog.stock) { return (p, "hub (V15)") }
             phase = .searching("Asking M-VAVE's server…")
-            if let p = try? await packages.officialLatest(), p.product == identity { return (p, "m-vave.com") }
+            if let p = try? await packages.officialLatest() {
+                noteOfficialAnswer(p)
+                if p.product == identity { return (p, "m-vave.com") }
+            }
         }
         let candidates = who?.firmware.map { [$0] } ?? catalog.familyCandidates(for: identity)
         if !candidates.isEmpty {
@@ -752,7 +1007,7 @@ final class DeviceController {
             s.firmwareName = f.name
             if f.needsOwnInstaller { s.ownInstaller = f.install }
         }
-        else if !ambiguous, let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
+        else if !ambiguous, packages.isFetchedOfficial(pkg.sha256), let v = pkg.officialVersion { s.version = v; s.firmwareName = "Official firmware" }
         else if ambiguous {
             s.version = nil
             s.firmwareId = nil
@@ -761,6 +1016,8 @@ final class DeviceController {
         }
         else if s.version == nil, let f = catalog.firmwares.first(where: { $0.product == pkg.product }) { s.firmwareName = f.name }
         s.packageNote = nil
+        let chip = chipSupport(sha256: pkg.sha256, product: pkg.product)
+        s.chip = chip == .unknown ? nil : chip.rawValue
         if s.notes.hasPrefix("No package found for ") { s.notes = "" }   // where older versions left that word
     }
 
@@ -800,7 +1057,7 @@ final class DeviceController {
     }
 
     /// Put a snapshot's firmware back.
-    func restoreFirmware(_ s: Snapshot) {
+    func restoreFirmware(_ s: Snapshot, consent: ChipVerdict = .install) {
         guard !isBusy, let url = library.packageURL(for: s) else { return }
         let what = catalog.firmwareName(of: s)
         var j = DeviceJob(kind: .restoreFirmware, title: "Restore: \(what)", subtitle: s.version ?? s.identity, colour: s.firmwareId.map { Look.colour(for: $0) } ?? Color(hex: "#42f5f5"), imageURL: s.firmwareId.map { HubAPI.url("img/\($0).png") })
@@ -808,11 +1065,11 @@ final class DeviceController {
             let before = identity?.text
             let pkg = try FWSCPackage(data: try Data(contentsOf: url))
             if let sha = s.packageSHA256, sha != pkg.sha256 { throw FM1Error.package("The saved package does not match its checksum.") }
-            let fw = s.firmwareId.flatMap { catalog.firmware(id: $0) }
             if catalog.ownInstaller(of: s) != nil { throw FM1Error.package("\(s.firmwareName) is installed by its maker's own page: the package alone is not all of it.") }
             try await autoSnapshotIfWanted()
-            let after = try await flash(pkg, product: pkg.product, stockLoader: pkg.isOfficial || fw?.usesStockLoader == true,
-                                        name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot)
+            let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg),
+                                        name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot,
+                                        consent: consent, remembered: s.chipSupport)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .snapshot, success: true))
             j.message = "Back on your FM-1: \(what)." + (s.hasArchive && s.musicRestoresInApp ? " Now restore the music archive from the same backup." : "")
@@ -869,7 +1126,7 @@ final class DeviceController {
             throw FM1Error.protocolError("The firmware on the FM-1 (\(music.info?.name ?? dev.identity.text)) does not answer SLOOP's backup protocol. Restore \(catalog.firmwareName(of: s)) first, then the music.")
         }
         // a firmware built on SLOOP can keep its name: its number tells it apart
-        if s.identity.hasPrefix("FM-1_"), s.identity != dev.identity.text {
+        if s.identity.hasPrefix("FM-1_"), !FM1Identity.same(s.identity, dev.identity.text) {
             dev.link.close()
             throw FM1Error.package("This music was made on a firmware that reports \(s.identity), and the FM-1 reports \(dev.identity.text). Restore the firmware first.")
         }

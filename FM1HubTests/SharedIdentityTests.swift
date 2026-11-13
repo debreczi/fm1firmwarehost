@@ -362,6 +362,40 @@ final class SharedIdentityTests: XCTestCase {
         XCTAssertFalse(c.packageIsUnconfirmed(in: official), "no other firmware has M-VAVE's own number")
     }
 
+    // MARK: Flash chips
+
+    /// The catalogue decides a package's chips only when it says something: a listed package it has gone silent on
+    /// keeps what the hub said of it before, so "the first FM-1s only" is never lost that way.
+    func testASilentCatalogueKeepsTheHubsEarlierWord() {
+        let sha = "silent-\(UUID().uuidString)"
+        let said = CatalogStore()
+        XCTAssertTrue(said.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"old"}]}"#.utf8)))
+        let silent = CatalogStore()
+        XCTAssertTrue(silent.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)"}]}"#.utf8)))
+        withController(silent) { device, _ in
+            XCTAssertEqual(device.chipSupport(sha256: sha, product: "FM-1_950"), .old)
+            XCTAssertEqual(device.chipSupport(sha256: "", product: "FM-1_950"), .unknown, "no hash, no word")
+        }
+    }
+
+    /// A catalogue read from the phone's cache can be older than the hub's last word: it never writes the app's record
+    /// of that word, and its "safe" never overrules a later "the first FM-1s only".
+    func testAnOlderCachedCatalogueCanNotUndoTheHubsLaterOld() {
+        let sha = "stale-\(UUID().uuidString)"
+        let now = CatalogStore()
+        XCTAssertTrue(now.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"old"}]}"#.utf8)))
+        let cached = CatalogStore()
+        XCTAssertTrue(cached.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"new"}]}"#.utf8), fresh: false))
+        XCTAssertEqual(PackageStore.shared.seenChip(sha), .old, "a cached catalogue's \"safe\" is never written back")
+        let dropped = "dropped-\(UUID().uuidString)"
+        let olderCache = CatalogStore()
+        XCTAssertTrue(olderCache.apply(Data(#"{"firmwares":[{"id":"y","name":"Y","pkg":"fw/y.fwsc","product":"FM-1_951","sha256":"\#(dropped)","chip":"old"}]}"#.utf8), fresh: false))
+        XCTAssertEqual(PackageStore.shared.seenChip(dropped), .old, "a cached catalogue may still add the first FM-1s only")
+        withController(cached) { device, _ in
+            XCTAssertEqual(device.chipSupport(sha256: sha, product: "FM-1_950"), .old)
+        }
+    }
+
     // MARK: What a package file says
 
     private func withController(_ catalog: CatalogStore, _ body: (DeviceController, LibraryStore) throws -> Void) rethrows {
