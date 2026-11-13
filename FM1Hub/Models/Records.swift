@@ -76,7 +76,8 @@ struct PendingUpdate: Codable, Hashable {
     /// What the device reported just before the attempt, when the app knew. Reconciling a finished update later
     /// depends on it: see `isFinished(by:)`.
     var identityBefore: String?
-    /// Which flash chips the package works on (a ChipSupport), as known when the attempt began, for Resume.
+    /// Which flash chips the package works on (a ChipSupport), as known when the attempt began. Only "the first FM-1s
+    /// only" counts later, and only as a lower bound (see `DeviceController.chipSupport(of:)`).
     var chip: String? = nil
 
     /// True when a device reporting this identity has already finished what this record was for, even if this app
@@ -119,7 +120,7 @@ struct Snapshot: Codable, Identifiable, Hashable {
     var packageNote: String? = nil      // why there is no package, while there is none
     var archiveFirmware: String? = nil  // what the firmware said when a SLOOP archive was made, "FELUCCA SLOOP 2.8.4"
     var ownInstaller: String? = nil     // the page that installs this package's firmware, when the package alone can't
-    var chip: String? = nil             // which flash chips the package works on (a ChipSupport), as known when it was stored
+    var chip: String? = nil             // which flash chips the package works on (a ChipSupport), as known when it was stored; only "old" counts later, as a lower bound
 
     var hasPackage: Bool { packageFile != nil }
     /// Kept as text, so that a value a later version writes never makes the library unreadable here.

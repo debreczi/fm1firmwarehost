@@ -355,11 +355,17 @@ final class DeviceController {
     }
 
     func chipSupport(of s: Snapshot) -> ChipSupport {
-        chipSupport(sha256: s.packageSHA256 ?? "", product: s.product ?? s.identity)
+        Self.atLeastOld(chipSupport(sha256: s.packageSHA256 ?? "", product: s.product ?? s.identity), remembered: s.chipSupport)
     }
 
     func chipSupport(of p: PendingUpdate) -> ChipSupport {
-        chipSupport(sha256: p.sha256, product: p.product)
+        Self.atLeastOld(chipSupport(sha256: p.sha256, product: p.product), remembered: p.chip.flatMap(ChipSupport.init(rawValue:)))
+    }
+
+    /// A record's own "the first FM-1s only" counts where the app knows nothing else: it can only make the check
+    /// stricter, so an edited file gains nothing by it. Nothing else a record says counts.
+    private static func atLeastOld(_ c: ChipSupport, remembered: ChipSupport?) -> ChipSupport {
+        c == .unknown && remembered == .old ? .old : c
     }
 
     /// What the flash chip check says now about installing a package with this support.
@@ -576,7 +582,7 @@ final class DeviceController {
     /// learnt only then, which what the user agreed to (`consent`) does not cover, stops the install with nothing written.
     private func flash(_ pkg: FWSCPackage, product: String, stockLoader: Bool,
                        name: String, version: String, firmwareId: String?, source: InstallSource,
-                       consent: ChipVerdict) async throws -> String {
+                       consent: ChipVerdict, remembered: ChipSupport? = nil) async throws -> String {
         // Cancel reaches the updater of the moment, and the updater made here starts afresh: one pressed before now, or
         // while the loader is asked for below, is only remembered by the task.
         if Task.isCancelled { throw FM1Error.cancelled }
@@ -595,7 +601,8 @@ final class DeviceController {
         let record: FM1Updater.BeforeWriting = { [self] dev in
             let found = dev.identity
             noteFlash(dev.flashID, port: dev.portName)
-            let support = chipSupport(sha256: pkg.sha256, product: pkg.product)   // the catalogue of this moment, for this very file
+            // the catalogue of this moment, for this very file; a backup's "the first FM-1s only" as for its question
+            let support = Self.atLeastOld(chipSupport(sha256: pkg.sha256, product: pkg.product), remembered: remembered)
             let now = chipVerdict(support)
             guard ChipGuard.allows(now, consent: consent) else {
                 append("flash chip check: \(flashChip?.summary ?? "not reported"), package \(support.rawValue): nothing written")
@@ -1030,7 +1037,7 @@ final class DeviceController {
             try await autoSnapshotIfWanted()
             let after = try await flash(pkg, product: pkg.product, stockLoader: usesStockLoader(pkg, firmwareId: s.firmwareId),
                                         name: what, version: s.version ?? "", firmwareId: s.firmwareId, source: .snapshot,
-                                        consent: consent)
+                                        consent: consent, remembered: s.chipSupport)
             library.add(InstallRecord(firmwareId: s.firmwareId, name: what, version: s.version ?? "", product: pkg.product, sha256: pkg.sha256,
                                       identityBefore: before, identityAfter: after, source: .snapshot, success: true))
             j.message = "Back on your FM-1: \(what)." + (s.hasArchive && s.musicRestoresInApp ? " Now restore the music archive from the same backup." : "")
