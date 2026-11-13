@@ -87,10 +87,11 @@ struct PendingUpdate: Codable, Hashable {
     /// same identity and differ only by hash, so if the device already reported this identity beforehand — a
     /// re-install, or a rebuilt package of what is already on it — a later identity match says nothing about which
     /// build is running, and the exact record must stay. The same goes for not having known at all.
-    /// An identity's three-digit form counts as the identity (see `FM1Identity.same`).
+    /// An identity's three-digit form counts as the identity (see `FM1Identity.answers`), a longer one never; what it
+    /// ran before counts as the same firmware either way round, which keeps the record when in doubt.
     func isFinished(by id: FM1Identity) -> Bool {
         guard let before = identityBefore else { return false }
-        return !id.isLoader && FM1Identity.same(id.text, product) && !FM1Identity.same(before, product)
+        return !id.isLoader && FM1Identity.answers(id.text, for: product) && !FM1Identity.same(before, product)
     }
 }
 

@@ -41,6 +41,13 @@ struct FM1Identity: Equatable, Hashable, Codable {
         return text[text.index(after: us)...].count == 3
     }
 
+    /// Does a device's answer name the firmware a package carries? The same text, or the three-digit form of the
+    /// package's identity, which a firmware answers the plain request with. Only that way round: an answer longer than
+    /// the package's identity is another firmware.
+    static func answers(_ observed: String, for expected: String) -> Bool {
+        observed == expected || (observed.count < expected.count && same(observed, expected))
+    }
+
     /// Do two identities name the same firmware? The same text, or one is the three-digit form of the other, which a
     /// firmware answers when it does not answer the full identity request.
     static func same(_ a: String, _ b: String) -> Bool {
@@ -95,7 +102,8 @@ enum FM1Protocol {
 
     /// The identity reply: 27 bytes, the text up to its first zero, then zeros, and in bytes 24-26 (high byte first) the
     /// flash's JEDEC ID when the firmware sends it (0: not sent). Binary can follow the text, so it ends at its first
-    /// zero, as felucca-bsp tells hosts to read it.
+    /// zero, as felucca-bsp tells hosts to read it. The chip ID counts only from a reply whose length and checksum hold,
+    /// as a read request's must; the identity stands without them, as it always has.
     static func parseHello(_ pkt: [UInt8]) -> FM1Hello? {
         guard pkt.count > 2, pkt.first == 0xF0, pkt.last == 0xF7 else { return nil }
         let d = SevenBit.unpack7(pkt[1..<(pkt.count - 1)])
@@ -103,8 +111,10 @@ enum FM1Protocol {
         let body = Array(d[6..<33])
         let end = body.firstIndex(of: 0) ?? body.count
         guard let id = FM1Identity.parse(text: String(decoding: body[..<end], as: UTF8.self)) else { return nil }
+        let sum = body.reduce(0) { $0 + Int($1) }
+        let intact = d[3] == 27 && d[4] == 0 && d[5] == 0 && UInt8(truncatingIfNeeded: ~sum) == d[33]
         // only where the text has ended before them can those bytes be the chip's
-        let jedec = end < 24 ? UInt32(body[24]) << 16 | UInt32(body[25]) << 8 | UInt32(body[26]) : 0
+        let jedec = intact && end < 24 ? UInt32(body[24]) << 16 | UInt32(body[25]) << 8 | UInt32(body[26]) : 0
         return FM1Hello(identity: id, flashID: jedec == 0 ? nil : jedec)
     }
 

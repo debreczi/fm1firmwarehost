@@ -63,6 +63,7 @@ final class CatalogStore {
         stock = cat.stock
         creators = cat.creators ?? [:]
         updated = cat.updated
+        PackageStore.shared.noteChips(firmwares)   // still the hub's word once it lists a newer version
         return true
     }
 

@@ -148,7 +148,7 @@ read). The reply's text ends at its first zero. M-VAVE's firmware never reports 
 package: `new` (every FM-1, the newer chip too), `old` (the first FM-1s only) or `any` (does not check the chip). It
 describes the catalogue's package, by SHA-256. M-VAVE's own firmware works on both: the V15 the hub keeps and the files
 the app fetched from M-VAVE's server, by SHA-256 (an official-looking identity alone can be a custom firmware's).
-Anything else, such as an older version, a file or a backup the catalogue doesn't list, is unknown.
+Anything else, such as an older version, a file or a backup the catalogue doesn't list, is unknown, unless the app read the catalogue while it listed that very package: the app keeps what the hub said, by SHA-256, in its own storage. What a backup's own files say never decides it.
 
 **What the app does** (`ChipGuard.verdict`, tested cell by cell in `FlashChipTests`):
 

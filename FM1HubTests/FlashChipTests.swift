@@ -101,6 +101,20 @@ final class FlashChipTests: XCTestCase {
         return #"{"id":"\#(id)","name":"\#(id)","pkg":"fw/\#(id).fwsc","product":"FM-1_900","sha256":"\#(id)"\#(c)}"#
     }
 
+    /// What the hub said of a package is kept in the app's own storage, by hash: it still counts once the catalogue
+    /// moves on, a later word replaces it, and silence takes nothing back.
+    func testTheHubsWordIsKeptByHash() throws {
+        let id = "kept-\(UUID().uuidString)"
+        XCTAssertEqual(PackageStore.shared.seenChip(id), .unknown)
+        PackageStore.shared.noteChips(try catalogue([entry(id, chip: "old")]))
+        XCTAssertEqual(PackageStore.shared.seenChip(id), .old)
+        PackageStore.shared.noteChips(try catalogue([entry(id, chip: "new")]))
+        XCTAssertEqual(PackageStore.shared.seenChip(id), .new)
+        PackageStore.shared.noteChips(try catalogue([entry(id, chip: nil)]))
+        XCTAssertEqual(PackageStore.shared.seenChip(id), .new)
+        XCTAssertEqual(PackageStore.shared.seenChip("never-\(UUID().uuidString)"), .unknown)
+    }
+
     func testTheCataloguesChipField() throws {
         let fw = try catalogue([entry("a", chip: "new"), entry("b", chip: "old"), entry("c", chip: "any"), entry("d", chip: nil),
                                 entry("e", chip: "both"), entry("f", chip: "NEW")])
@@ -130,13 +144,13 @@ final class FlashChipTests: XCTestCase {
 final class IdentityReplyTests: XCTestCase {
 
     /// A cmd 0x11 reply as the firmwares build it: 27 bytes of text and zeros, the JEDEC ID in bytes 24-26.
-    private func reply(_ text: String, jedec: UInt32 = 0, tail: [UInt8] = []) -> [UInt8] {
+    private func reply(_ text: String, jedec: UInt32 = 0, tail: [UInt8] = [], checksumOffset: Int = 0, length: UInt8 = 27) -> [UInt8] {
         var body = Array(text.utf8) + tail
         body += Array(repeating: 0, count: max(0, 27 - body.count))
         body = Array(body.prefix(27))
         if jedec != 0 { body[24] = UInt8(jedec >> 16 & 0xFF); body[25] = UInt8(jedec >> 8 & 0xFF); body[26] = UInt8(jedec & 0xFF) }
         let sum = body.reduce(0) { $0 + Int($1) }
-        let msg: [UInt8] = [0x00, 0x59, 0x11, 27, 0, 0] + body + [UInt8(truncatingIfNeeded: ~sum)]
+        let msg: [UInt8] = [0x00, 0x59, 0x11, length, 0, 0] + body + [UInt8(truncatingIfNeeded: ~sum + checksumOffset)]
         return [0xF0] + SevenBit.pack7(msg) + [0xF7]
     }
 
@@ -184,6 +198,14 @@ final class IdentityReplyTests: XCTestCase {
         XCTAssertFalse(FM1Protocol.asksFullIdentity(after: hello("ota-FM-1_900").identity), "a loader")
     }
 
+    func testAChipIDCountsOnlyFromAnIntactReply() {
+        let broken = FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.first, checksumOffset: 1))
+        XCTAssertEqual(broken?.identity.text, "FM-1_378011", "the identity stands, as it always has")
+        XCTAssertNil(broken?.flashID, "a chip ID from a reply that doesn't add up counts as not reported")
+        XCTAssertNil(FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.newer, length: 26))?.flashID)
+        XCTAssertEqual(FM1Protocol.parseHello(reply("FM-1_378011", jedec: FlashChip.newer))?.flashID, FlashChip.newer)
+    }
+
     func testMergingTheTwoReplies() {
         // a firmware that doesn't answer the full request keeps its plain answer
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: nil), hello("FM-1_900"))
@@ -216,6 +238,14 @@ final class IdentityReplyTests: XCTestCase {
         XCTAssertFalse(FM1Identity.same("FM-1_601", "FM-2_6010000"))
     }
 
+    func testAnAnswerNamesThePackageOnlyAsItsShortForm() {
+        XCTAssertTrue(FM1Identity.answers("FM-1_904", for: "FM-1_904"))
+        XCTAssertTrue(FM1Identity.answers("FM-1_601", for: "FM-1_6010000"), "felucca-bsp's plain reply")
+        XCTAssertFalse(FM1Identity.answers("FM-1_6010000", for: "FM-1_601"), "a longer answer is another firmware")
+        XCTAssertFalse(FM1Identity.answers("FM-1_602", for: "FM-1_6010000"))
+        XCTAssertFalse(FM1Identity.answers("ota-FM-1_601", for: "ota-FM-1_6010000"))
+    }
+
     func testAPendingUpdateFinishedUnderTheShortForm() {
         let p = PendingUpdate(product: "FM-1_6010000", sha256: "beef", firmwareId: "ctl", name: "CTL", version: "1.0",
                               usesStockLoader: false, source: .hub, identityBefore: "FM-1_900")
@@ -224,5 +254,8 @@ final class IdentityReplyTests: XCTestCase {
         var again = p
         again.identityBefore = "FM-1_601"
         XCTAssertFalse(again.isFinished(by: FM1Identity.parse(text: "FM-1_6010000")!), "it ran this firmware before too: which build is unknown")
+        let short = PendingUpdate(product: "FM-1_601", sha256: "beef", firmwareId: nil, name: "x", version: "",
+                                  usesStockLoader: false, source: .hub, identityBefore: "FM-1_900")
+        XCTAssertFalse(short.isFinished(by: FM1Identity.parse(text: "FM-1_6010000")!), "an identity longer than the package's is another firmware")
     }
 }

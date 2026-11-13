@@ -47,10 +47,10 @@ struct DeviceView: View {
     private func askFile(_ u: URL) {
         guard let picked = device.pickedPackage(u) else { device.installFile(u); return }   // the install says what is wrong
         let verdict = device.chipVerdict(picked.support)
-        if verdict == .install { device.installFile(u); return }
+        if verdict == .install { device.installFile(u, expectedSHA256: picked.package.sha256); return }
         let name = picked.firmware.map { "\($0.name) \($0.version)" } ?? u.lastPathComponent
         prompt = InstallPrompt(title: "Install \(name) from the file?", message: "\(u.lastPathComponent), \(picked.package.product).",
-                               confirm: "Install", verdict: verdict) { consent in device.installFile(u, consent: consent) }
+                               confirm: "Install", verdict: verdict) { consent in device.installFile(u, consent: consent, expectedSHA256: picked.package.sha256) }
     }
 
     private func askOfficial(latest: Bool) {
@@ -60,9 +60,9 @@ struct DeviceView: View {
     /// Resume starts at once, as before, unless the flash chip check has something to say about the package.
     private func askResume(_ p: PendingUpdate) {
         let verdict = device.chipVerdict(device.chipSupport(of: p))
-        if verdict == .install { device.resume(); return }
+        if verdict == .install { device.resume(expected: p); return }
         prompt = InstallPrompt(title: "Resume: \(p.name)?", message: "Writes the package that was being written again\(p.version.isEmpty ? "" : ": \(p.name) \(p.version)").",
-                               confirm: "Resume", verdict: verdict) { consent in device.resume(consent: consent) }
+                               confirm: "Resume", verdict: verdict) { consent in device.resume(consent: consent, expected: p) }
     }
 
     private func versionLine(_ f: Firmware, exact: Bool, reports: String) -> String {

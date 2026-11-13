@@ -52,10 +52,11 @@ final class PackageStore {
             return p
         }
         // M-VAVE publish no size for this one, so only the ceiling in download() and this floor bound it.
-        let data = try await download(HubAPI.officialLatest, expectedSize: 720_000, onProgress: onProgress)
+        let data = try await download(HubAPI.officialLatest, expectedSize: 720_000, sameHost: true, onProgress: onProgress)
         guard data.count > 200_000 else { throw FM1Error.package("M-VAVE's file is only \(data.count) bytes: not an FM-1 firmware.") }
         let p = try FWSCPackage(data: data)
         guard p.isOfficial else { throw FM1Error.package("M-VAVE's file is not an official FM-1 firmware (it reports \(p.product)).") }
+        if Task.isCancelled { throw FM1Error.cancelled }   // nothing kept for a check or install given up on
         try? keep(p)
         noteOfficial(p.sha256)
         return p
@@ -67,6 +68,30 @@ final class PackageStore {
     /// M-VAVE's own: an official-looking number alone can be a custom firmware's (SPAMPY is FM-1_036).
     func isFetchedOfficial(_ sha256: String) -> Bool {
         sha256 == FWSCPackage.stockV15SHA256 || (UserDefaults.standard.stringArray(forKey: Self.officialKey) ?? []).contains(sha256)
+    }
+
+    private static let chipKey = "chipBySHA256"
+
+    /// The hub's word on each package's flash chips, kept in the app's own storage whenever the app reads the catalogue,
+    /// so it still counts once the catalogue lists a newer version. A backup's or record's files, which can be edited,
+    /// never stand in for it.
+    func noteChips(_ firmwares: [Firmware]) {
+        var all = UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String] ?? [:]
+        var changed = false
+        for f in firmwares {
+            let c = f.chipSupport
+            guard !f.sha256.isEmpty, c == .new || c == .any || c == .old, all[f.sha256] != c.rawValue else { continue }
+            all[f.sha256] = c.rawValue
+            changed = true
+        }
+        if changed { UserDefaults.standard.set(all, forKey: Self.chipKey) }
+    }
+
+    /// What the catalogue last said of this package when the app read it, or unknown.
+    func seenChip(_ sha256: String) -> ChipSupport {
+        guard let v = (UserDefaults.standard.dictionary(forKey: Self.chipKey) as? [String: String])?[sha256],
+              let c = ChipSupport(rawValue: v), c == .new || c == .any || c == .old else { return .unknown }
+        return c
     }
 
     private func noteOfficial(_ sha256: String) {
@@ -215,8 +240,9 @@ final class PackageStore {
     /// Streams a package into memory under a hard ceiling. `exactSize` is the size the catalogue (or a GitHub
     /// release) states for this asset: when it is given, the body has to match it to the byte, before anything is
     /// parsed or kept. `expectedSize` is only the progress bar's estimate for when the server announces no length.
+    /// `sameHost`: the file must come from the host asked, over HTTPS, wherever a redirect points.
     private func download(_ url: URL, expectedSize: Int, exactSize: Int? = nil,
-                          maxBytes: Int = PackageStore.maxPackageBytes,
+                          maxBytes: Int = PackageStore.maxPackageBytes, sameHost: Bool = false,
                           onProgress: ((Double) -> Void)?) async throws -> Data {
         if let exact = exactSize, exact <= 0 || exact > maxBytes {
             throw FM1Error.package("This package is listed as \(exact) bytes, which cannot be an FM-1 package. Nothing was downloaded.")
@@ -228,6 +254,9 @@ final class PackageStore {
         let (bytes, resp) = try await URLSession.shared.bytes(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw FM1Error.package("The package could not be downloaded (HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)).")
+        }
+        if sameHost, http.url?.host != url.host || http.url?.scheme != "https" {
+            throw FM1Error.package("The download was sent on to another server (\(http.url?.host ?? "unknown")): nothing was kept.")
         }
         // what the server says it will send, refused before the first byte is kept
         let announced = http.expectedContentLength > 0 ? Int(http.expectedContentLength) : nil
