@@ -233,6 +233,8 @@ final class IdentityReplyTests: XCTestCase {
         // an answer that does not belong to the plain one is not taken
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601"), full: hello("FM-1_7010000")), hello("FM-1_601"))
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("FM-1_9001")), hello("FM-1_9001", full: true), "felucca-bsp shortens FM-1_9001 to FM-1_900")
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601", FlashChip.newer), full: hello("FM-1_601", FlashChip.newer)), hello("FM-1_601", FlashChip.newer),
+                       "a three-digit answer repeated may be a late copy of the plain one: not known to be whole")
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("SMK_9001")), hello("FM-1_900"), "another model")
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_6010000"), full: hello("FM-1_601")), hello("FM-1_6010000"))
         // a chip in a reply that does not belong may add a warning, never take one away

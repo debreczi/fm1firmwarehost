@@ -137,7 +137,8 @@ final class FM1Updater {
     }
 
     /// Another FM-1 that answers besides this one, on another MIDI device: the app writes to one FM-1 at a time, so
-    /// nothing is written while one does. Ports of the same USB device are the same FM-1.
+    /// nothing is written while one does. Ports of the same USB device are the same FM-1, and gear of another model
+    /// that answers the request is not an FM-1.
     func anotherFM1(than dev: FM1Device) async -> (identity: FM1Identity, port: String)? {
         let mine = engine.device(of: dev.endpoint)
         for src in engine.sources() where src.endpoint != dev.endpoint && mayProbe(src.name) {
@@ -147,7 +148,7 @@ final class FM1Updater {
                   let link = engine.open(source: src.endpoint, destination: dest, name: src.name) else { continue }
             let h = await handshake(link, tries: 1, askFull: false)
             link.close()
-            if let h {
+            if let h, h.identity.modelWithoutLoader == dev.identity.modelWithoutLoader {
                 log("another FM-1 answers: \(h.identity.text) on \(src.name)")
                 return (h.identity, src.name)
             }

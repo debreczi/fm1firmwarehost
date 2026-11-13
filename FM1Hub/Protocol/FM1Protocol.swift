@@ -137,7 +137,10 @@ enum FM1Protocol {
         guard full.identity.model == plain.identity.model,
               full.identity.text == plain.identity.text || (plain.identity.isThreeDigits && FM1Identity.same(full.identity.text, plain.identity.text))
         else { return FM1Hello(identity: plain.identity, flashID: plain.flashID ?? full.flashID.flatMap { $0 == FlashChip.first ? nil : $0 }) }
-        return FM1Hello(identity: full.identity, flashID: full.flashID ?? plain.flashID, full: true)
+        // whole for sure only when it says more than the plain answer, or the plain answer was no three-digit form: a
+        // late copy of a three-digit plain answer looks just like a full one
+        return FM1Hello(identity: full.identity, flashID: full.flashID ?? plain.flashID,
+                        full: full.identity.text != plain.identity.text || !plain.identity.isThreeDigits)
     }
 
     static func parseRequest(_ pkt: [UInt8]) -> FM1ReadRequest? {

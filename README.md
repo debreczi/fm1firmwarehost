@@ -145,7 +145,7 @@ read). The reply's text ends at its first zero. The first FM-1s' chip counts onl
 checksum hold; another chip counts from any reply, since it can only make the check stricter. M-VAVE's firmware never reports the chip, so most of the time it is
 "not reported" and a newer FM-1 can't be told from a first one. Connect one FM-1 at a time: the app stops when
 another one answers (on another USB device) and checks the update loader's model, but while an FM-1 restarts
-during an update it can't tell it from another plugged into the same port.
+during an update it can't tell it from another one plugged in at that moment.
 
 **Which firmwares work on it.** The hub's catalogue has a `chip` field for each firmware, which the hub reads from the
 package: `new` (every FM-1, the newer chip too), `old` (the first FM-1s only) or `any` (does not check the chip). It

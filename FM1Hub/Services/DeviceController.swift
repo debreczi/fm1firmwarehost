@@ -327,18 +327,22 @@ final class DeviceController {
 
     /// What a device found just now said of its chip. A newer or unknown chip is also remembered (`unsafeChip`), with
     /// the unit that said it; the first FM-1s' chip, reported now by that same unit, puts it away; another unit's word
-    /// never does. A device that says nothing, a loader too, leaves only that.
-    private func noteFlash(_ id: UInt32?, port: String, endpoint: MIDIEndpointRef) {
+    /// never does. A device that says nothing, a loader too, leaves only that. `sameUnit`: the device that came back
+    /// after this app wrote to it, which is that unit wherever its port and name went.
+    private func noteFlash(_ id: UInt32?, port: String, endpoint: MIDIEndpointRef, sameUnit: Bool = false) {
         if let id, flashChip != .reported(id) { append("flash chip \(FlashChip.hex(id))") }
         flashReport = DeviceFlash(id)
         reportPort = port
-        guard let id else { return }
         let device = engine.device(of: endpoint)
+        guard let id else {
+            if sameUnit, unsafeChip != nil { unsafeDevice = device; unsafePort = port }   // a firmware may name its port otherwise
+            return
+        }
         if id != FlashChip.first {
             unsafeChip = id
             unsafeDevice = device
             unsafePort = port
-        } else if unsafeChip != nil, device != 0, device == unsafeDevice {
+        } else if unsafeChip != nil, sameUnit || (device != 0 && device == unsafeDevice) {
             forgetUnsafe()
         }
     }
@@ -544,7 +548,7 @@ final class DeviceController {
             let pkg = try await pendingPackage(pending, firmware: f)
             if Task.isCancelled { throw FM1Error.cancelled }   // the updater made here knows nothing of an earlier Cancel
             let up = makeUpdater()
-            defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port, endpoint: b.endpoint) } }   // whatever the outcome
+            defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port, endpoint: b.endpoint, sameUnit: true) } }   // whatever the outcome
             // The record already exists; this writes back the loader identity this attempt found, so that if the
             // record was made without knowing what the device was running, a later Connect can still settle it.
             let outcome = try await up.resume(image: pkg.logicalImage, expectedProduct: pending.product, stockLoader: usesStockLoader(pkg),
@@ -606,7 +610,7 @@ final class DeviceController {
         // while the loader is asked for below, is only remembered by the task.
         if Task.isCancelled { throw FM1Error.cancelled }
         let up = makeUpdater()
-        defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port, endpoint: b.endpoint) } }   // whatever the outcome
+        defer { if let b = up.cameBack { noteFlash(b.flashID, port: b.port, endpoint: b.endpoint, sameUnit: true) } }   // whatever the outcome
         let image = pkg.logicalImage
         try packages.keep(pkg)   // Resume needs this file: refuse the install rather than lose it
         // The record is written by this hook, which the updater calls once it has found the device and checked its
