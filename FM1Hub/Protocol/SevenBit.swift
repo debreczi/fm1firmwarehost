@@ -126,6 +126,8 @@ enum FM1Error: LocalizedError {
     case chipCheck(String)
     /// Probably a newer FM-1 on a firmware for the first FM-1s: it can't update itself any more.
     case stuck(String)
+    /// Another FM-1 answers too: the app writes to one at a time.
+    case several(String)
     case cancelled
 
     var code: String {
@@ -146,6 +148,7 @@ enum FM1Error: LocalizedError {
         case .noRequests: return "norequests"
         case .chipCheck: return "chip"
         case .stuck: return "stuck"
+        case .several: return "several"
         case .cancelled: return "cancelled"
         }
     }
@@ -154,7 +157,7 @@ enum FM1Error: LocalizedError {
         switch self {
         case .notFound(let s), .model(let s), .stopped(let s), .lost(let s), .noLoader(let s), .noReturn(let s),
              .mismatch(let s), .badRequest(let s), .foreign(let s), .package(let s), .protocolError(let s), .midi(let s), .backup(let s),
-             .noRequests(let s), .chipCheck(let s), .stuck(let s):
+             .noRequests(let s), .chipCheck(let s), .stuck(let s), .several(let s):
             return s
         case .cancelled: return "Cancelled."
         }
@@ -165,7 +168,7 @@ enum FM1Error: LocalizedError {
     /// mid-write or cannot be told apart from one, so it counts as "the device may have been touched".
     var nothingWritten: Bool {
         switch self {
-        case .notFound, .model, .foreign, .package, .midi, .backup, .chipCheck: return true
+        case .notFound, .model, .foreign, .package, .midi, .backup, .chipCheck, .several: return true
         case .stopped, .lost, .noLoader, .noReturn, .mismatch, .badRequest, .protocolError, .cancelled, .noRequests, .stuck: return false
         }
     }
@@ -179,6 +182,7 @@ enum FM1Error: LocalizedError {
         case .noRequests: return "Replug the USB cable and press Install again."
         case .noReturn: return "Power-cycle the FM-1. If it does not start, hold OCT− while switching it on and install again."
         case .stuck: return "A newer FM-1 stuck like this needs a computer: the hub's rescue page shows how. Otherwise, replug the USB cable and press Install again."
+        case .several: return "Unplug the other FM-1s, then press Install again."
         case .cancelled, .package, .model, .mismatch, .badRequest, .foreign, .protocolError, .midi, .backup, .chipCheck: return ""
         }
     }

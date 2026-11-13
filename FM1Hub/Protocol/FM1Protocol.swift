@@ -44,8 +44,9 @@ struct FM1Identity: Equatable, Hashable, Codable {
     /// Does a device's answer name the firmware a package carries? The same text, or the three-digit form of the
     /// package's identity, which a firmware answers the plain request with. Only that way round: an answer longer than
     /// the package's identity is another firmware.
-    static func answers(_ observed: String, for expected: String) -> Bool {
-        observed == expected || (observed.count < expected.count && same(observed, expected))
+    /// `full`: the answer came to the full identity request, so it is whole: only the same text counts.
+    static func answers(_ observed: String, for expected: String, full: Bool = false) -> Bool {
+        observed == expected || (!full && observed.count < expected.count && same(observed, expected))
     }
 
     /// Do two identities name the same firmware? The same text, or one is the three-digit form of the other, which a
@@ -63,6 +64,8 @@ struct FM1Identity: Equatable, Hashable, Codable {
 struct FM1Hello: Equatable {
     let identity: FM1Identity
     let flashID: UInt32?
+    /// The identity is the answer to the full identity request: whole, never a three-digit short form.
+    var full = false
 }
 
 /// A cmd 0x30 read request from the device.
@@ -134,7 +137,7 @@ enum FM1Protocol {
         guard full.identity.model == plain.identity.model,
               full.identity.text == plain.identity.text || (plain.identity.isThreeDigits && FM1Identity.same(full.identity.text, plain.identity.text))
         else { return FM1Hello(identity: plain.identity, flashID: plain.flashID ?? full.flashID.flatMap { $0 == FlashChip.first ? nil : $0 }) }
-        return FM1Hello(identity: full.identity, flashID: full.flashID ?? plain.flashID)
+        return FM1Hello(identity: full.identity, flashID: full.flashID ?? plain.flashID, full: true)
     }
 
     static func parseRequest(_ pkt: [UInt8]) -> FM1ReadRequest? {

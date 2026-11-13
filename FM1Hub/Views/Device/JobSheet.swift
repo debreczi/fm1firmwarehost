@@ -106,7 +106,7 @@ struct JobSheet: View {
             switch s {
             case .start(let id): return "The FM-1 (\(id)) is asked to start the update."
             case .verify(let n): return "Step 1: the running firmware reads the package header and stages the update loader (\(n) reads)."
-            case .loader: return "The FM-1 restarts into the update loader. Its screen may go dark for a moment."
+            case .loader: return "The FM-1 restarts into the update loader. Its screen may go dark for a moment. Keep only this FM-1 connected."
             case .write(let n): return "Step 2: the loader reads the whole image and writes it to flash (\(n) of about \(FM1Protocol.step2Reads) reads). Do not unplug."
             case .reboot: return "The FM-1 restarts with the new firmware."
             case .done(let id): return "Done: \(id)."

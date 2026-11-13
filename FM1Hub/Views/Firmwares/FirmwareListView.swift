@@ -28,7 +28,7 @@ struct FirmwareListView: View {
         var list = catalog.firmwares.filter { f in
             if !settings.showBetas && f.beta && !f.isDevOnly { return false }
             if !settings.showDevOnly && f.isDevOnly { return false }
-            if settings.newerChipOnly && f.chipSupport != .new { return false }
+            if settings.newerChipOnly && device.chipSupport(sha256: f.sha256, product: f.product) != .new { return false }
             for g in Kinds.groups {
                 let ticked = g.kinds.map(\.key).filter { selected.contains($0) }
                 if !ticked.isEmpty && !ticked.contains(where: { f.allKinds.contains($0) }) { return false }

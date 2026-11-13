@@ -100,6 +100,14 @@ final class MIDIEngine: @unchecked Sendable {
         return e
     }
 
+    /// The MIDI device an endpoint belongs to (one USB device, whatever its ports), or 0 when it has none.
+    func device(of endpoint: MIDIEndpointRef) -> MIDIDeviceRef {
+        var d = MIDIDeviceRef()
+        let e = entity(of: endpoint)
+        if e != 0 { MIDIEntityGetDevice(e, &d) }
+        return d
+    }
+
     /// True while the endpoint is still in the system and online.
     func isPresent(_ endpoint: MIDIEndpointRef, source: Bool) -> Bool {
         let list = source ? sources() : destinations()

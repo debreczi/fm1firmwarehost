@@ -20,7 +20,7 @@ struct FlashChipsView: View {
             } header: { Text("The chips the app knows") } footer: { Text("The JEDEC ID each chip answers with.") }
 
             Section {
-                Text("Only from the firmware running on the FM-1, when it reports its chip: some community firmwares send the chip's ID in bytes 24 to 26 of their answer to the identity request. M-VAVE's own firmware never reports it, so most of the time the chip is not reported, and the app can't tell a newer FM-1 from a first one.")
+                Text("Only from the firmware running on the FM-1, when it reports its chip: some community firmwares send the chip's ID in bytes 24 to 26 of their answer to the identity request. Connect one FM-1 at a time: the app stops when another one answers, but while an FM-1 restarts during an update it can't tell it from another plugged into the same port. M-VAVE's own firmware never reports it, so most of the time the chip is not reported, and the app can't tell a newer FM-1 from a first one.")
             } header: { Text("How the app learns the chip") }
 
             Section {

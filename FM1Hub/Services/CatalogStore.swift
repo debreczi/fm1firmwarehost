@@ -28,7 +28,7 @@ final class CatalogStore {
 
     func loadCache() {
         guard let data = try? Data(contentsOf: Paths.catalogCache) else { return }
-        apply(data)
+        apply(data, fresh: false)
     }
 
     func refresh(force: Bool = false) async {
@@ -56,14 +56,16 @@ final class CatalogStore {
         }
     }
 
+    /// `fresh`: the hub's catalogue of now, which the app's record of its word follows; a cached copy may be older,
+    /// so it never writes that record.
     @discardableResult
-    func apply(_ data: Data) -> Bool {
+    func apply(_ data: Data, fresh: Bool = true) -> Bool {
         guard let cat = try? JSONDecoder().decode(Catalog.self, from: data) else { return false }
         firmwares = cat.firmwares.filter { !$0.pkg.isEmpty && !$0.product.isEmpty }
         stock = cat.stock
         creators = cat.creators ?? [:]
         updated = cat.updated
-        PackageStore.shared.noteChips(firmwares)   // still the hub's word once it lists a newer version
+        if fresh { PackageStore.shared.noteChips(firmwares) }   // still the hub's word once it lists a newer version
         return true
     }
 

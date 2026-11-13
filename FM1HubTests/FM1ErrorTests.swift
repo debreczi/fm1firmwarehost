@@ -31,7 +31,7 @@ final class FM1ErrorTests: XCTestCase {
     func testEveryErrorHasItsOwnCodeAndSomethingToSay() {
         let all: [FM1Error] = [.notFound("a"), .model("a"), .stopped("a"), .lost("a"), .noLoader("a"),
                                .noReturn("a"), .mismatch("a"), .badRequest("a"), .foreign("a"), .package("a"),
-                               .protocolError("a"), .midi("a"), .backup("a"), .noRequests("a"), .chipCheck("a"), .stuck("a"), .cancelled]
+                               .protocolError("a"), .midi("a"), .backup("a"), .noRequests("a"), .chipCheck("a"), .stuck("a"), .several("a"), .cancelled]
         XCTAssertEqual(Set(all.map(\.code)).count, all.count, "the UI hints off these codes, so they must be distinct")
         for e in all {
             XCTAssertFalse((e.errorDescription ?? "").isEmpty, "\(e.code) has no message")

@@ -378,6 +378,20 @@ final class SharedIdentityTests: XCTestCase {
         }
     }
 
+    /// A catalogue read from the phone's cache can be older than the hub's last word: it never writes the app's record
+    /// of that word, and its "safe" never overrules a later "the first FM-1s only".
+    func testAnOlderCachedCatalogueCanNotUndoTheHubsLaterOld() {
+        let sha = "stale-\(UUID().uuidString)"
+        let now = CatalogStore()
+        XCTAssertTrue(now.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"old"}]}"#.utf8)))
+        let cached = CatalogStore()
+        XCTAssertTrue(cached.apply(Data(#"{"firmwares":[{"id":"x","name":"X","pkg":"fw/x.fwsc","product":"FM-1_950","sha256":"\#(sha)","chip":"new"}]}"#.utf8), fresh: false))
+        XCTAssertEqual(PackageStore.shared.seenChip(sha), .old, "a cached catalogue writes nothing back")
+        withController(cached) { device, _ in
+            XCTAssertEqual(device.chipSupport(sha256: sha, product: "FM-1_950"), .old)
+        }
+    }
+
     // MARK: What a package file says
 
     private func withController(_ catalog: CatalogStore, _ body: (DeviceController, LibraryStore) throws -> Void) rethrows {

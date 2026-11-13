@@ -167,8 +167,8 @@ final class IdentityReplyTests: XCTestCase {
         return [0xF0] + SevenBit.pack7(msg) + [0xF7]
     }
 
-    private func hello(_ text: String, _ flash: UInt32? = nil) -> FM1Hello {
-        FM1Hello(identity: FM1Identity.parse(text: text)!, flashID: flash)
+    private func hello(_ text: String, _ flash: UInt32? = nil, full: Bool = false) -> FM1Hello {
+        FM1Hello(identity: FM1Identity.parse(text: text)!, flashID: flash, full: full)
     }
 
     func testTheQueries() {
@@ -225,14 +225,14 @@ final class IdentityReplyTests: XCTestCase {
         // a firmware that doesn't answer the full request keeps its plain answer
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: nil), hello("FM-1_900"))
         // felucca-bsp: three digits to the plain request, the whole identity to the full one
-        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601"), full: hello("FM-1_6010000")), hello("FM-1_6010000"))
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601"), full: hello("FM-1_6010000")), hello("FM-1_6010000", full: true))
         // ESTAMPIE: the same identity, and the chip
-        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_378011"), full: hello("FM-1_378011", FlashChip.newer)), hello("FM-1_378011", FlashChip.newer))
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_378011"), full: hello("FM-1_378011", FlashChip.newer)), hello("FM-1_378011", FlashChip.newer, full: true))
         // a chip in the plain reply stays when the full one has none
-        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601", FlashChip.first), full: hello("FM-1_6010000")), hello("FM-1_6010000", FlashChip.first))
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601", FlashChip.first), full: hello("FM-1_6010000")), hello("FM-1_6010000", FlashChip.first, full: true))
         // an answer that does not belong to the plain one is not taken
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_601"), full: hello("FM-1_7010000")), hello("FM-1_601"))
-        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("FM-1_9001")), hello("FM-1_9001"), "felucca-bsp shortens FM-1_9001 to FM-1_900")
+        XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("FM-1_9001")), hello("FM-1_9001", full: true), "felucca-bsp shortens FM-1_9001 to FM-1_900")
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_900"), full: hello("SMK_9001")), hello("FM-1_900"), "another model")
         XCTAssertEqual(FM1Protocol.merge(plain: hello("FM-1_6010000"), full: hello("FM-1_601")), hello("FM-1_6010000"))
         // a chip in a reply that does not belong may add a warning, never take one away
@@ -259,12 +259,14 @@ final class IdentityReplyTests: XCTestCase {
         XCTAssertFalse(FM1Identity.answers("FM-1_6010000", for: "FM-1_601"), "a longer answer is another firmware")
         XCTAssertFalse(FM1Identity.answers("FM-1_602", for: "FM-1_6010000"))
         XCTAssertFalse(FM1Identity.answers("ota-FM-1_601", for: "ota-FM-1_6010000"))
+        XCTAssertFalse(FM1Identity.answers("FM-1_601", for: "FM-1_6010000", full: true), "a whole identity of three digits is another firmware")
+        XCTAssertTrue(FM1Identity.answers("FM-1_6010000", for: "FM-1_6010000", full: true))
     }
 
     func testAPendingUpdateFinishedUnderTheShortForm() {
         let p = PendingUpdate(product: "FM-1_6010000", sha256: "beef", firmwareId: "ctl", name: "CTL", version: "1.0",
                               usesStockLoader: false, source: .hub, identityBefore: "FM-1_900")
-        XCTAssertTrue(p.isFinished(by: FM1Identity.parse(text: "FM-1_601")!))
+        XCTAssertFalse(p.isFinished(by: FM1Identity.parse(text: "FM-1_601")!), "a three-digit answer could be another firmware: the record stays")
         XCTAssertTrue(p.isFinished(by: FM1Identity.parse(text: "FM-1_6010000")!))
         var again = p
         again.identityBefore = "FM-1_601"

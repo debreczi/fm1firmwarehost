@@ -46,7 +46,8 @@ final class PackageStore {
 
     /// The current official firmware from M-VAVE's download server (V16 at the time of writing; whatever they publish next).
     /// `cachedOnly`: no network, the newest official package on the phone.
-    func officialLatest(cachedOnly: Bool = false, onProgress: ((Double) -> Void)? = nil) async throws -> FWSCPackage {
+    /// `commit`: keep the file and note its hash here; the version check does that itself (`commitOfficial`).
+    func officialLatest(cachedOnly: Bool = false, commit: Bool = true, onProgress: ((Double) -> Void)? = nil) async throws -> FWSCPackage {
         if cachedOnly {
             guard let p = newestCachedOfficial() else { throw FM1Error.package("No official firmware on this phone yet.") }
             return p
@@ -57,9 +58,15 @@ final class PackageStore {
         let p = try FWSCPackage(data: data)
         guard p.isOfficial else { throw FM1Error.package("M-VAVE's file is not an official FM-1 firmware (it reports \(p.product)).") }
         if Task.isCancelled { throw FM1Error.cancelled }   // nothing kept for a check or install given up on
+        if commit { commitOfficial(p) }
+        return p
+    }
+
+    /// Keeps M-VAVE's file and records its hash as M-VAVE's own. The version check calls this on the main actor, after
+    /// its last look, so that Delete cache can't land between that look and the write.
+    func commitOfficial(_ p: FWSCPackage) {
         try? keep(p)
         noteOfficial(p.sha256)
-        return p
     }
 
     private static let officialKey = "officialSHA256s"
