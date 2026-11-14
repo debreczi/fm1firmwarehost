@@ -203,3 +203,5 @@ uploads only when the branch's version is new, being prepared or rejected, and e
 finished, because `deliver` edits whichever version is open (waiting for review included) and renames it to the
 branch's version. It never submits for review. The **App Store Connect** workflow (`.github/workflows/asc.yml`) does
 the quicker tasks for the version of the branch it runs on, such as sending a build to the public TestFlight group.
+
+Related: try FM-1 firmwares in the browser with the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
