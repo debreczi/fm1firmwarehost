@@ -59,7 +59,8 @@ One-time setup (needs a paid Apple Developer Program membership):
    platform iOS, bundle ID `com.debreczi.fm1hub` (register it under Identifiers if it is not offered), any name and
    SKU. TestFlight builds can only be uploaded to an existing app record.
 2. **API key.** App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys → `+`.
-   Role **App Manager** (Admin also works). Download the `.p8` once; note the **Key ID** and the **Issuer ID**.
+   Role **Admin**: with App Manager the archive works, but the export fails with "Cloud signing permission error".
+   Download the `.p8` once; note the **Key ID** and the **Issuer ID**.
 3. **Team ID.** [developer.apple.com/account](https://developer.apple.com/account) → Membership details.
 4. **Repository secrets** (GitHub → Settings → Secrets and variables → Actions):
 
