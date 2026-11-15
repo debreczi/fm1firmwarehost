@@ -78,9 +78,9 @@ One-time setup (needs a paid Apple Developer Program membership):
    HTTPS, so "standard encryption, exempt"), then add yourself as an internal tester. The TestFlight app on the phone
    installs it.
 
-If the archive step fails with a signing error on the first run, open the project once in Xcode with your team
-selected and let it register the bundle ID, or register `com.debreczi.fm1hub` by hand under Identifiers; cloud
-signing then works on the next run.
+If the "Upload to TestFlight" step fails with a signing error on the first run, open the project once in Xcode with
+your team selected and let it register the bundle ID, or register `com.debreczi.fm1hub` by hand under Identifiers;
+cloud signing then works on the next run.
 
 ## Project layout
 
