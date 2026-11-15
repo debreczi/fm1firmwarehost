@@ -208,8 +208,8 @@ def report():
         bd = related(b, "buildBetaDetail", "buildBetaDetails")
         pv = related(b, "preReleaseVersion", "preReleaseVersions")
         print(f"  {pv.get('version', '?'):<6} {a['version']:<14} uploaded {a['uploadedDate'][:16]}"
-              f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState', '?'):<22}"
-              f" external {bd.get('externalBuildState', '?')}")
+              f"  processing {a['processingState']:<10} TestFlight internal {bd.get('internalBuildState') or '?':<27}"
+              f" external {bd.get('externalBuildState') or '?'}")
     vs = versions()
     v = next((x for x in vs if x["attributes"]["versionString"] == VERSION), None)
     cur = call("GET", f"/v1/appStoreVersions/{v['id']}/build").get("data") if v else None
